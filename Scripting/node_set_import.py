@@ -27,13 +27,14 @@ def create_node_set_from_file(file_path, new_node_set_name):
 
     # Print a confirmation message
         print("Created a new node set '" + new_node_set_name + "' with " + str(len(node_numbers)) + " nodes.")
+        print('Saving model database...')
+        mdb.save()
+        print('Save complete.')
+        
     except IOError:
         print("File '" + file_path + "' not found or an error occurred while reading it. Please ensure the file exists.")
     except ValueError:
         print("Error converting node numbers to integers. Please ensure the file contains valid integers separated by commas.")
     except KeyError:
         print("Error creating the new node set. Please check your model and script.")
-    
-    print('Saving model database...')
-    mdb.save()
-    print('Save complete.')
+     
