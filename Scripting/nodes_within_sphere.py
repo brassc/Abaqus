@@ -39,9 +39,4 @@ def create_node_set_within_sphere(existing_node_set_name, radius, filename, cent
     create_node_set_from_file(filename, new_node_set_name)
     message = "Created a new node set '{}' with nodes within a sphere of radius {} mm at center ({}, {}, {})."
     print(message.format(new_node_set_name, radius, center_x, center_y, center_z))
-   
-    # Save the updated model database
-    print('Saving model database...')
-    mdb.save()
-    print('Save complete.')
 
