@@ -8,6 +8,8 @@ from list_check import list_check
 # Get the model database
 modelDB = mdb.models['Model-1']
 
+"""
+##Create half and half swelling
 #export set node labels
 create_file_from_node_set(set_name='GM_Node_Set')
 create_file_from_node_set(set_name='Swelling_Region_DC_Side')
@@ -17,14 +19,10 @@ list_check(list1='GM_Node_Set_NodeList.txt', list2='Swelling_Region_DC_Side_Node
 
 #create new set from new list of the nodes that are not in both lists
 create_node_set_from_file(file_path='node_numbers.txt', new_node_set_name='Non_Swelling')
+"""
 
 
-#import function parameters
-# Specify the path to the .txt file containing node numbers
-#file_path = 'node_numbers.txt'
-#new_node_set_name = 'Non_Swelling'
-#create_node_set_from_file(file_path, new_node_set_name)
-
+##Create swelling sphere and non-swelling rest
 # Specify the existing node set and the radius of the sphere
 existing_node_set_name = 'GM_Node_Set'
 radius = 30 # in mm
@@ -33,21 +31,27 @@ radius = 30 # in mm
 nodes_outside_sphere_filename = 'nodes_outside_sphere.txt'
 nodes_outside_sphere_set_name='NodesOutsideSphere'
 
+# Get the sphere centre reference point by name
+reference_point_name = "RP-SC"
+
+# Get the coordinates of sphere center reference point
+center_x = int(mdb.models['Model-1'].rootAssembly.features[reference_point_name].xValue)
+center_y = int(mdb.models['Model-1'].rootAssembly.features[reference_point_name].yValue)
+center_z = int(mdb.models['Model-1'].rootAssembly.features[reference_point_name].zValue)
+print(center_x, center_y, center_z)
+
 # Create node set within sphere of specified radius
 create_node_set_within_sphere(existing_node_set_name,
                               radius,
                               filename='nodes_within_sphere.txt',
-                              center_x=50,  # X-coordinate of the sphere's center
-                              center_y=50,  # Y-coordinate of the sphere's center
-                              center_z=50   # Z-coordinate of the sphere's center
+                              center_x=center_x,  # X-coordinate of the sphere's center
+                              center_y=center_y,  # Y-coordinate of the sphere's center
+                              center_z=center_z   # Z-coordinate of the sphere's center
                               ) 
 
 
-#list_check(list1='GM_Node_Set_NodeList.txt', list2='Swelling_Region_DC_Side_NodeList.txt', filename_list='node_numbers.txt')
-
-
 #Create node set outside sphere
-list_check(list1='GM_Node_Set_NodeList.txt', list2='nodes_within_sphere.txt', filename_list='nodes_outside_sphere.txt')
+list_check(list1='GM_Node_Set_NodeList.txt', list2='nodes_within_sphere.txt', filename_list=nodes_outside_sphere_filename)
 create_node_set_from_file(nodes_outside_sphere_filename, nodes_outside_sphere_set_name)
 
 

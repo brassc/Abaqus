@@ -20,7 +20,7 @@ def create_node_set_from_file(file_path, new_node_set_name):
         # Create the assembly node set directly from the list of node labels
         
         # Create the assembly node set from node labels
-        print('Creating new assembly node set from node labels...)
+        print('Creating new assembly node set from node labels...')
         modelDB.rootAssembly.SetFromNodeLabels(name=new_node_set_name, nodeLabels=(('E_GMVC-1', node_numbers), 
         ))
     

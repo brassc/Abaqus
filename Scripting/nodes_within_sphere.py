@@ -20,7 +20,7 @@ def create_node_set_within_sphere(existing_node_set_name, radius, filename, cent
         # Check each node in the existing set if it falls within the sphere
         for node in existing_node_set.nodes:
             x, y, z = node.coordinates
-            distance = ((x - center_y)**2 + (y - center_y)**2 + (z - center_z)**2)**0.5  # Euclidean distance
+            distance = ((x - center_x)**2 + (y - center_y)**2 + (z - center_z)**2)**0.5  # Euclidean distance
             if distance <= radius:
                 nodes_within_sphere.append(node)
         txt_file.write(','.join(str(node.label) for node in nodes_within_sphere))
