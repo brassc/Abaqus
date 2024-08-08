@@ -3,12 +3,12 @@ from abaqusConstants import *
 from node_set_import import create_node_set_from_file
 
 
-def create_node_set_within_sphere(existing_node_set_name, radius, filename, center_x, center_y, center_z):
+def create_node_set_within_sphere(existing_node_set_name, new_node_set_name, radius, filename, center_x, center_y, center_z):
     # Get the model database
     modelDB = mdb.models['Model-1']
     
     # Create a new node set for nodes within the sphere
-    new_node_set_name = 'NodesWithinSphere'
+    #new_node_set_name = 'NodesWithinSphere'
     nodes_within_sphere = []
 
     # Get the coordinates of the nodes in the existing node set
