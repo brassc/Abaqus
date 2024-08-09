@@ -1,7 +1,7 @@
 This set of programs exports a node set from Abaqus as comma separated list in a .txt file. 
 From this exported list, node sets can be compared and a new node set created. 
 
-The main.py is run in the Abaqus kernel via the execfile('<filename.py>') command.
+The main.py is run in the Abaqus kernel via the execfile('<filename.py>') command. Set work directory in Abaqus to repo location. 
 The node_set_export.py create_file_from_node_set function extracts nodes from assembly set and exports to .txt as comma separated list
 
 
