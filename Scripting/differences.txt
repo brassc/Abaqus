@@ -1,0 +1,7 @@
+- ** Job name: Job-45 Model name: Model-1
+- *Amplitude, name=Amp-2
+- *Boundary, op=NEW, amplitude=Amp-2
++ ** Job name: Job-46 Model name: Model-1
++ *Amplitude, name=Amp-2-Linear
++ *Amplitude, name=Amp-2-Smooth, definition=SMOOTH STEP
++ *Boundary, op=NEW, amplitude=Amp-2-Smooth
