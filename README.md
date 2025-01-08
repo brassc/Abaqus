@@ -20,7 +20,7 @@ using center_x, center_y, center_z variables in `main.py`.
 
 # Results Processing 
 ## EVOL evaluation and plotting
-How to create EVOL data plots:
+How to get EVOL data out of Abaqus:
 1. Opn relevant CAE file (denoted by stated mesh size)
 2. Open matching output database (.odb)
 3. Navigate to Abaqus repo in kernel:
@@ -30,4 +30,5 @@ How to create EVOL data plots:
     - Within the script, check that .odb file name and output `'w'` filename is correct
     - This outputs a `evol_<N>mm.csv` file
 5. Push new file to repo
-6. 
+
+
