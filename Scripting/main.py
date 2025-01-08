@@ -4,6 +4,7 @@ from nodes_within_sphere import create_node_set_within_sphere
 from node_set_export import create_file_from_node_set
 from node_set_import import create_node_set_from_file
 from list_check import list_check
+import sys
 
 # Get the model database
 modelDB = mdb.models['Model-1']
@@ -12,13 +13,15 @@ modelDB = mdb.models['Model-1']
 ##Create half and half swelling
 #export set node labels
 create_file_from_node_set(set_name='GM_Node_Set')
-create_file_from_node_set(set_name='Swelling_Region_DC_Side')
+#create_file_from_node_set(set_name='Swelling_Region_DC_Side')
+print('file(s) created from node set(s)')
 
 #compare the two lists
-list_check(list1='GM_Node_Set_NodeList.txt', list2='Swelling_Region_DC_Side_NodeList.txt', filename_list='node_numbers.txt')
+#print('comparing node lists...')
+#list_check(list1='GM_Node_Set_NodeList.txt', list2='Swelling_Region_DC_Side_NodeList.txt', filename_list='node_numbers.txt')
 
 #create new set from new list of the nodes that are not in both lists
-create_node_set_from_file(file_path='node_numbers.txt', new_node_set_name='Non_Swelling')
+#create_node_set_from_file(file_path='node_numbers.txt', new_node_set_name='Non_Swelling')
 
 
 

@@ -15,13 +15,13 @@ def compare_files(file1_path, file2_path, output_path):
             differences.append(f"+ {line}")
     
     print(differences)
-    """
+    
     # Write differences to output file
     with open(output_path, 'w') as output_file:
         output_file.writelines(differences)
 
     print(f"Differences written to {output_path}")
-    """
+    
     
     
 
