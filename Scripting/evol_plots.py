@@ -8,25 +8,26 @@ base_path=Path.cwd()
 thesis_chapter_path_vector = Path.cwd().parent.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Vector'
 thesis_chapter_path_raster = Path.cwd().parent.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Raster'
 evol_5mm_path=base_path / 'evol_5mm.csv'
-#evol_3mm_path=base_path / 'evol_3mm.csv'
+evol_3mm_path=base_path / 'evol_3mm.csv'
 #evol_2mm_path=base_path / 'evol_2mm.csv'
-#evol_10mm_path=base_path / 'evol_10mm.csv'
+evol_10mm_path=base_path / 'evol_10mm.csv'
 
 # Read the data
 evol_5mm=pd.read_csv(evol_5mm_path)
-#evol_3mm=pd.read_csv(evol_3mm_path)
+evol_3mm=pd.read_csv(evol_3mm_path)
 #evol_2mm=pd.read_csv(evol_2mm_path)
-#evol_10mm=pd.read_csv(evol_10mm_path)
+evol_10mm=pd.read_csv(evol_10mm_path)
 
 # fake data for testing
-evol_3mm=evol_5mm.copy()
-evol_3mm['EVOL Sum']=0.5*evol_5mm['EVOL Sum']
+
+#evol_3mm=evol_5mm.copy()
+#evol_3mm['EVOL Sum']=0.5*evol_5mm['EVOL Sum']
 
 evol_2mm=evol_5mm.copy()
-evol_2mm['EVOL Sum']=0.25*evol_5mm['EVOL Sum']
+evol_2mm['EVOL Sum']=1.05*evol_5mm['EVOL Sum']
 
-evol_10mm=evol_5mm.copy()
-evol_10mm['EVOL Sum']=1.1*evol_5mm['EVOL Sum']
+#evol_10mm=evol_5mm.copy()
+#evol_10mm['EVOL Sum']=1.1*evol_5mm['EVOL Sum']
 
 #print(evol_5mm.head())
 
@@ -52,10 +53,10 @@ plt.scatter(mesh_sizes, [peak_2mm_evol, peak_3mm_evol, peak_5mm_evol, peak_10mm_
 plt.xlabel('Mesh size (mm)')
 plt.ylabel('Peak Cerebrum Volume (mm³)')
 plt.xlim(0)
-plt.ylim(0)
+#plt.ylim(0)
 plt.savefig(thesis_chapter_path_vector / 'peak_cerebrum_vol_vs_mesh_size.png')
 plt.savefig(thesis_chapter_path_raster / 'peak_cerebrum_vol_vs_mesh_size.png')
-plt.close()
+plt.show()
 
 
 # plotting EVOL vs time for each mesh
@@ -67,7 +68,7 @@ plt.plot(evol_10mm['Frame'], evol_10mm['EVOL Sum'], color='y', label='10mm')
 plt.xlabel('Frame')
 plt.ylabel('Cerebrum Volume (mm³)')
 plt.xlim(1)
-plt.ylim(0)
+#plt.ylim(0)
 plt.legend()
 plt.savefig(thesis_chapter_path_vector / 'cerebrum_vol_vs_time.png')
 plt.savefig(thesis_chapter_path_raster / 'cerebrum_vol_vs_time.png')
