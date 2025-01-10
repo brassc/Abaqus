@@ -33,7 +33,7 @@ How to get EVOL data out of Abaqus:
 
 The program `evol_plots.py` uses `evol_<N>mm.csv` to plot EVOL vs. time for multiple mesh sizes and to plot peak cerebrum volume vs. mesh size. 
     - Plots are saved as `peak_cerebrum_vol_vs_mesh_size.png` and `cerebrum_vol_vs_time.png`. 
-
+Other plots are created directly from the `phd-thesis-template-2.4` repo using `plot_scripts/mesh_sensitivity/mesh_sensitivity_script.py` and `plot_scripts/mesh_sensitivity/mesh_sensitivity.csv`. 
 
 
 
