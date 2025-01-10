@@ -31,4 +31,10 @@ How to get EVOL data out of Abaqus:
     - This outputs a `evol_<N>mm.csv` file
 5. Push new file to repo
 
+The program `evol_plots.py` uses `evol_<N>mm.csv` to plot EVOL vs. time for multiple mesh sizes and to plot peak cerebrum volume vs. mesh size. 
+    - Plots are saved as `peak_cerebrum_vol_vs_mesh_size.png` and `cerebrum_vol_vs_time.png`. 
+
+
+
+
 
