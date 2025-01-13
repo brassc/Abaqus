@@ -23,7 +23,7 @@ def euclidean_distance_3d(x1, y1, z1, x2, y2, z2):
     """
     return np.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
 
-def get_max_strain(odb, step_name, frame_number, center_point, radius):
+def get_max_strain(odb, step_name, frame_number, center_point, radius, mesh_size):
     """
     Get the maximum strain value within a given radius of a centerpoint.
     
@@ -130,17 +130,11 @@ def get_max_strain(odb, step_name, frame_number, center_point, radius):
         with open('max_strain.csv', 'a') as f:
             # Write header
             if is_new_file:
-                f.write('mesh_size,max_strain\n')
+                f.write('mesh_size,max_strain,radius\n')
             
             # Write data based on odb path
             print('odb:', odb)
-            print('odb')
-            if 'Job-99.odb' in str(odb):
-                f.write('10, {0}\n'.format(max_strain))
-            elif 'Job-100.odb' in str(odb):
-                f.write('5,{0}\n'.format(max_strain))
-            elif 'Job-102.odb' in str(odb):
-                f.write('3,{0}\n'.format(max_strain))
+            f.write('{0}, {1}, {2}\n'.format(mesh_size, max_strain, radius))
             
         
         return nodes_within_radius, max_strain
@@ -156,11 +150,15 @@ def get_max_strain(odb, step_name, frame_number, center_point, radius):
 
 # Test the function
 odb_filepath='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-099\Job-99.odb' 
+odb_filepath2='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-100\Job-100.odb' 
+odb_filepath3='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-102\Job-102.odb' 
 step_name='Step-2'
 frame_number=25
 center_point = (34, -52, 18)
-radius = 5
-nodes_within_radius, max_strain = get_max_strain(odb_filepath, step_name, frame_number, center_point, radius)
+radius = 3
+nodes_within_radius, max_strain = get_max_strain(odb_filepath, step_name, frame_number, center_point, radius, mesh_size=10)
+nodes_within_radius, max_strain = get_max_strain(odb_filepath2, step_name, frame_number, center_point, radius, mesh_size=5)
+nodes_within_radius, max_strain = get_max_strain(odb_filepath3, step_name, frame_number, center_point, radius, mesh_size=3)
 
 
 
