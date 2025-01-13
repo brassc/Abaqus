@@ -36,5 +36,11 @@ The program `evol_plots.py` uses `evol_<N>mm.csv` to plot EVOL vs. time for mult
 Other plots are created directly from the `phd-thesis-template-2.4` repo using `plot_scripts/mesh_sensitivity/mesh_sensitivity_script.py` and `plot_scripts/mesh_sensitivity/mesh_sensitivity.csv`. 
 
 
+## Max strain evaluation
+The `roi.py` script gets maximum strain output from different mesh size output databases (.odb) at a particular $(x, y, z)$ location with radius $r=3$ and records in .csv file, `max_strain.csv`. 
+Other plots are created directly from the `phd-thesis-template-2.4` repo using `plot_scripts/mesh_sensitivity/mesh_sensitivity_script.py` and `plot_scripts/mesh_sensitivity/mesh_sensitivity.csv`.
+
+
+
 
 
