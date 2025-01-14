@@ -5,12 +5,14 @@ import sys
 
 # Define a base path
 base_path=Path.cwd()
-thesis_chapter_path_vector = Path.cwd().parent.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Vector'
-thesis_chapter_path_raster = Path.cwd().parent.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Raster'
-evol_5mm_path=base_path / 'evol_5mm.csv'
-evol_3mm_path=base_path / 'evol_3mm.csv'
+print(base_path)
+
+thesis_chapter_path_vector = base_path.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Vector'
+thesis_chapter_path_raster = base_path.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Raster'
+evol_5mm_path=base_path / 'Scripting/evol_5mm.csv'
+evol_3mm_path=base_path / 'Scripting/evol_3mm.csv'
 #evol_2mm_path=base_path / 'evol_2mm.csv'
-evol_10mm_path=base_path / 'evol_10mm.csv'
+evol_10mm_path=base_path / 'Scripting/evol_10mm.csv'
 
 # Read the data
 evol_5mm=pd.read_csv(evol_5mm_path)
@@ -33,7 +35,12 @@ evol_10mm=pd.read_csv(evol_10mm_path)
 
 #ys.exit()
 
-# Find peak EVOL 
+# Find evol at frame 25 (index 26)
+evol_5mm_frame25=evol_5mm.loc[26, 'EVOL Sum']
+evol_3mm_frame25=evol_3mm.loc[26, 'EVOL Sum']
+evol_10mm_frame25=evol_10mm.loc[26, 'EVOL Sum']
+
+#peak EVOL
 peak_5mm_evol=evol_5mm['EVOL Sum'].max()
 peak_3mm_evol=evol_3mm['EVOL Sum'].max()
 #peak_2mm_evol=evol_2mm['EVOL Sum'].max()
@@ -44,11 +51,14 @@ mesh_sizes=[3, 5, 10]
 
 # plotting peak EVOL vs mesh size
 plt.figure(figsize=(10,6))
-plt.scatter(mesh_sizes, [peak_3mm_evol, peak_5mm_evol, peak_10mm_evol], color='b', label='Peak EVOL')
-plt.xlabel('Mesh size (mm)')
-plt.ylabel('Peak Cerebrum Volume (mm³)')
-plt.xlim(0)
-#plt.ylim(0)
+#plt.scatter(mesh_sizes, [peak_3mm_evol, peak_5mm_evol, peak_10mm_evol], color='b', label='Peak EVOL')
+plt.scatter(mesh_sizes, [evol_3mm_frame25, evol_5mm_frame25, evol_10mm_frame25], color='b', label='EVOL at Frame 25')
+
+plt.xlabel('Mesh Size (mm)')
+plt.ylabel('Cerebrum Volume (mm³)')
+plt.xlim(0, 12)
+plt.ylim(0, 1300000)
+plt.title('Cerebrum Volume (mm³) vs. Mesh Size in Step 2, Frame 25')
 plt.savefig(thesis_chapter_path_vector / 'peak_cerebrum_vol_vs_mesh_size.png')
 plt.savefig(thesis_chapter_path_raster / 'peak_cerebrum_vol_vs_mesh_size.png')
 plt.show()
