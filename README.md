@@ -37,7 +37,7 @@ Other plots are created directly from the `phd-thesis-template-2.4` repo using `
 
 
 ## Max strain evaluation
-The `roi.py` script gets maximum strain output from different mesh size output databases (.odb) at a particular $(x, y, z)$ location with radius $r=3$ and records in .csv file, `max_strain.csv`. 
+The `roi.py` script gets maximum strain output from different mesh size output databases (.odb) at a particular $(x, y, z)$ location with radius $r=3$ and records in .csv file, `max_strain.csv`. The `roi.py` script is ran using the following command inside terminal from the directory containing the `roi.py` script: `abaqus cae nogui=roi.py`. This allows use of proprietary abaqus libraries, but avoids having to open cae GUI. 
 Other plots are created directly from the `phd-thesis-template-2.4` repo using `plot_scripts/mesh_sensitivity/mesh_sensitivity_script.py` and `plot_scripts/mesh_sensitivity/mesh_sensitivity.csv`.
 
 
