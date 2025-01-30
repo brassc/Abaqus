@@ -66,7 +66,7 @@ mesh_sizes=[3, 4, 5, 7, 10]
 # plotting peak EVOL vs mesh size
 plt.figure(figsize=(10,6))
 #plt.scatter(mesh_sizes, [peak_3mm_evol, peak_5mm_evol, peak_10mm_evol], color='b', label='Peak EVOL')
-plt.scatter(mesh_sizes, [evol_3mm_frame25, evol_4mm_frame25, evol_5mm_frame25, evol_7mm_frame25, evol_10mm_frame25], color='b', label='EVOL at Frame 25')
+plt.scatter(mesh_sizes, [evol_3mm_frame25, evol_4mm_frame25, evol_5mm_frame25, evol_7mm_frame25, evol_10mm_frame25], color='b', label='EVOL at Frame 25', s=15)
 
 plt.xlabel('Mesh Size (mm)')
 plt.ylabel('Cerebrum Volume (mm³)')
