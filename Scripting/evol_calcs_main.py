@@ -3,7 +3,7 @@ from abaqusConstants import *
 import sys
 
 # Open the .odb file
-odb = openOdb(path='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-109\Job-109.odb')
+odb = openOdb(path='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-108\Job-108.odb')
 
 # Access the step and frame information
 step = odb.steps['Step-2']  # Change this to your specific step name
@@ -45,7 +45,7 @@ for frame in step.frames:
 #for i, evol in enumerate(total_evol_over_time):
 #    print(f"Frame {i+1}, EVOL sum: {evol}")
   
-with open('C:\\Users\\cmb247\\repos\\Abaqus\\Scripting\\evol_7mm.csv', 'w') as f:
+with open('C:\\Users\\cmb247\\repos\\Abaqus\\Scripting\\evol_4mm.csv', 'w') as f:
     f.write('Frame,EVOL Sum\n')
     for i, evol in enumerate(total_evol_over_time):
         f.write("{},{}\n".format(i+1, evol))
