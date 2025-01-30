@@ -43,11 +43,12 @@ evol_3mm=pd.read_csv(evol_3mm_path)
 #ys.exit()
 
 # Find evol at frame 25 (index 26)
-evol_10mm_frame25=evol_10mm.loc[26, 'EVOL Sum']
-evol_7mm_frame25=evol_7mm.loc[26, 'EVOL Sum']
-evol_5mm_frame25=evol_5mm.loc[26, 'EVOL Sum']
-evol_4mm_frame25=evol_4mm.loc[26, 'EVOL Sum']
-evol_3mm_frame25=evol_3mm.loc[26, 'EVOL Sum']
+index=21 # for frame 20
+evol_10mm_frame25=evol_10mm.loc[index, 'EVOL Sum']
+evol_7mm_frame25=evol_7mm.loc[index, 'EVOL Sum']
+evol_5mm_frame25=evol_5mm.loc[index, 'EVOL Sum']
+evol_4mm_frame25=evol_4mm.loc[index, 'EVOL Sum']
+evol_3mm_frame25=evol_3mm.loc[index, 'EVOL Sum']
 
 
 #peak EVOL
@@ -71,7 +72,7 @@ plt.xlabel('Mesh Size (mm)')
 plt.ylabel('Cerebrum Volume (mm³)')
 plt.xlim(0, 12)
 plt.ylim(0, 1300000)
-plt.title('Cerebrum Volume (mm³) vs. Mesh Size in Step 2, Frame 25')
+plt.title(f'Cerebrum Volume (mm³) vs. Mesh Size in Step 2, Frame {index}')
 plt.savefig(thesis_chapter_path_vector / 'peak_cerebrum_vol_vs_mesh_size_more.png')
 plt.savefig(thesis_chapter_path_raster / 'peak_cerebrum_vol_vs_mesh_size_more.png')
 plt.show()
