@@ -155,7 +155,7 @@ odb_filepath3='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-102\Job-102.odb'
 odb_filepath4='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-109\Job-109.odb' #7mm mesh
 odb_filepath5='C:\Users\cmb247\ABAQUS\K_DC_FALX\K-DCBH-108\Job-108.odb' #4mm mesh
 step_name='Step-2'
-frame_number=20
+frame_number=24
 center_point = (34, -52, 18)
 radius = 3
 nodes_within_radius, max_strain = get_max_strain(odb_filepath, step_name, frame_number, center_point, radius, mesh_size=10)
