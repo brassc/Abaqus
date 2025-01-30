@@ -160,8 +160,8 @@ center_point = (34, -52, 18)
 radius = 3
 nodes_within_radius, max_strain = get_max_strain(odb_filepath, step_name, frame_number, center_point, radius, mesh_size=10)
 nodes_within_radius, max_strain = get_max_strain(odb_filepath4, step_name, frame_number, center_point, radius, mesh_size=7)
-nodes_within_radius, max_strain = get_max_strain(odb_filepath5, step_name, frame_number, center_point, radius, mesh_size=4)
 nodes_within_radius, max_strain = get_max_strain(odb_filepath2, step_name, frame_number, center_point, radius, mesh_size=5)
+nodes_within_radius, max_strain = get_max_strain(odb_filepath5, step_name, frame_number, center_point, radius, mesh_size=4)
 nodes_within_radius, max_strain = get_max_strain(odb_filepath3, step_name, frame_number, center_point, radius, mesh_size=3)
 
 
