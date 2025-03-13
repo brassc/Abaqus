@@ -163,90 +163,7 @@ if step_2_dir.exists():
     print("\nLoading frames from Step-2...")
     step_2_frames = load_frames_from_dir(step_2_dir)
 
-### plt model structure 
-# Function to plot the model structure correctly
-def plot_model_structure(model_structure, element_set_name='GM_CB', title=None):
-    """
-    Plot the model structure for the specified element set.
-    
-    Args:
-        model_structure: Model structure dictionary
-        element_set_name: Name of the element set to plot
-        title: Plot title
-    """
-    # Extract node coordinates
-    nodes = model_structure['node_coordinates']
-    elements = model_structure['element_connectivity']
-    
-    # Setup the figure
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # The element_sets structure is different than expected
-    # It seems to be a dictionary of (part_name, element_id) tuples
-    part_elements = {}
-    element_set = model_structure['element_sets'].get(element_set_name, [])
-    
-    # Group elements by part
-    for part_name, elem_id in element_set:
-        if part_name not in part_elements:
-            part_elements[part_name] = []
-        part_elements[part_name].append(elem_id)
-    
-    print(f"Found {len(part_elements)} parts in element set {element_set_name}")
-    for part_name, elem_ids in part_elements.items():
-        print(f"  Part {part_name}: {len(elem_ids)} elements")
-    
-    # Get all nodes for visualization
-    all_nodes = set()
-    for part_name, elem_ids in part_elements.items():
-        if part_name in elements:
-            part_connectivity = elements[part_name]
-            for elem_id in elem_ids:
-                if elem_id in part_connectivity:
-                    node_ids = part_connectivity[elem_id]['connectivity']
-                    all_nodes.update(node_ids)
-    
-    print(f"Total unique nodes: {len(all_nodes)}")
-    
-    # Plot nodes
-    if all_nodes:
-        print("Plotting nodes...")
-        x, y, z = [], [], []
-        for node_id in all_nodes:
-            if node_id in nodes:
-                node_coords = nodes[node_id]
-                x.append(node_coords[0])
-                y.append(node_coords[1])
-                z.append(node_coords[2])
-        
-        ax.scatter(x, y, z, c='blue', marker='x', alpha=0.1, s=10)
-        
-        # Set equal aspect ratio to keep visualization proportional
-        ax.set_box_aspect([1, 1, 1])
-        
-        # Set labels
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        
-        if title:
-            plt.title(title)
-        else:
-            plt.title(f'Model Structure - {element_set_name}')
-        
-        plt.tight_layout()
-        plt.savefig('model_structure.png')
-        print("Plot saved as model_structure.png")
-        
-        return fig, ax
-    else:
-        print("No nodes found for plotting")
-        return None, None
-
-# Plot the model structure
-#plot_model_structure(model_structure)
-
+### plt model structure - NODES ONLY
 # Debugging function to check node structure
 def debug_node_structure(model_structure, max_nodes=5):
     """
@@ -265,108 +182,6 @@ def debug_node_structure(model_structure, max_nodes=5):
             print(f"Node {key} coordinates: {nodes[key]['coordinates']}")
         else:
             print(f"Node {key} value: {nodes[key]}")
-
-# Modified function to plot model structure
-def plot_model_structure_fixed(model_structure, element_set_name='GM_CB', title=None):
-    """
-    Plot the model structure with fixes for the nested node structure
-    """
-    # Extract node coordinates
-    nodes = model_structure['node_coordinates']
-    elements = model_structure['element_connectivity']
-    
-    # Setup the figure
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # The element_sets structure is as expected
-    part_elements = {}
-    element_set = model_structure['element_sets'].get(element_set_name, [])
-    
-    # Group elements by part
-    for part_name, elem_id in element_set:
-        if part_name not in part_elements:
-            part_elements[part_name] = []
-        part_elements[part_name].append(elem_id)
-    
-    print(f"Found {len(part_elements)} parts in element set {element_set_name}")
-    
-    # Get all nodes for visualization
-    all_nodes = set()
-    for part_name, elem_ids in part_elements.items():
-        if part_name in elements:
-            part_connectivity = elements[part_name]
-            for elem_id in elem_ids:
-                if elem_id in part_connectivity:
-                    node_ids = part_connectivity[elem_id]['connectivity']
-                    all_nodes.update(node_ids)
-    
-    print(f"Total unique nodes: {len(all_nodes)}")
-    
-    # Plot nodes - account for nested node structure
-    if all_nodes:
-        x, y, z = [], [], []
-        valid_nodes = 0
-        
-        for node_id in all_nodes:
-            if node_id in nodes:
-                try:
-                    # Extract coordinates from nested dictionary
-                    if isinstance(nodes[node_id], dict) and 'coordinates' in nodes[node_id]:
-                        node_coords = nodes[node_id]['coordinates']
-                    else:
-                        node_coords = nodes[node_id]
-                        
-                    # Ensure we have valid 3D coordinates
-                    if len(node_coords) == 3 and all(isinstance(coord, (int, float, np.number)) for coord in node_coords):
-                        x.append(float(node_coords[0]))
-                        y.append(float(node_coords[1]))
-                        z.append(float(node_coords[2]))
-                        valid_nodes += 1
-                except Exception as e:
-                    print(f"Error with node {node_id}: {e}")
-                    continue
-        
-        print(f"Found {valid_nodes} valid nodes with coordinates for plotting")
-        
-        if valid_nodes > 0:
-            scatter = ax.scatter(x, y, z, c='blue', marker='x', alpha=0.5, s=10)
-            
-            # Set equal aspect ratio to keep visualization proportional
-            ax.set_box_aspect([1, 1, 1])
-            
-            # Set labels
-            ax.set_xlabel('X')
-            ax.set_ylabel('Y')
-            ax.set_zlabel('Z')
-            
-            if title:
-                plt.title(title)
-            else:
-                plt.title(f'Model Structure - {element_set_name}')
-            
-            plt.tight_layout()
-            plt.savefig('model_structure_fixed.png')
-            print("Plot saved as model_structure_fixed.png")
-            
-            return fig, ax
-        else:
-            print("No valid nodes found for plotting")
-            return None, None
-    else:
-        print("No nodes found for plotting")
-        return None, None
-
-# First check the node structure
-#debug_node_structure(model_structure)
-
-# Then try the fixed plotting function
-#plot_model_structure_fixed(model_structure)
-# Updated function to properly extract node coordinates
-# More direct visualization approach with explicit control
-
-# Try the direct visualization approach
-#visualize_model_direct(model_structure)
 
 #visualize_complete_model(model_structure, element_set_name='GM_CB', max_elements=500000)
 def visualize_large_model(model_structure, element_set_name='GM_CB', sample_ratio=0.05):
@@ -610,91 +425,95 @@ def visualize_multi_angle(model_structure, element_set_name='GM_CB', sample_rati
 # Run the multi-angle visualization
 visualize_multi_angle(model_structure)
 
+
+
+
+
 sys.exit()
 
-# Assume we've already loaded the data
-# model_structure contains node coordinates and element connectivity
-# step_1_frames and step_2_frames contain the field outputs (LE) for each frame
+# # Assume we've already loaded the data
+# # model_structure contains node coordinates and element connectivity
+# # step_1_frames and step_2_frames contain the field outputs (LE) for each frame
 
-# First, let's inspect the structure of the field outputs
-def explore_frame_data(frame_data):
-    """Explore the structure of frame data to find where the field values are stored"""
-    print("\nExploring frame data structure:")
-    print(f"Top level keys: {frame_data.keys()}")
+# # First, let's inspect the structure of the field outputs
+# def explore_frame_data(frame_data):
+#     """Explore the structure of frame data to find where the field values are stored"""
+#     print("\nExploring frame data structure:")
+#     print(f"Top level keys: {frame_data.keys()}")
     
-    if 'field_outputs' in frame_data:
-        print(f"Field output keys: {frame_data['field_outputs'].keys()}")
+#     if 'field_outputs' in frame_data:
+#         print(f"Field output keys: {frame_data['field_outputs'].keys()}")
         
-        if 'LE' in frame_data['field_outputs']:
-            print(f"LE structure: {frame_data['field_outputs']['LE'].keys()}")
+#         if 'LE' in frame_data['field_outputs']:
+#             print(f"LE structure: {frame_data['field_outputs']['LE'].keys()}")
             
-            # Print a sample of the first field output structure
-            print("\nSample of LE field output structure:")
-            for key, value in frame_data['field_outputs']['LE'].items():
-                if isinstance(value, dict):
-                    print(f"  {key}: {list(value.keys())}")
-                elif isinstance(value, list) or isinstance(value, np.ndarray):
-                    print(f"  {key}: Array of shape {np.array(value).shape}")
-                else:
-                    print(f"  {key}: {value}")
+#             # Print a sample of the first field output structure
+#             print("\nSample of LE field output structure:")
+#             for key, value in frame_data['field_outputs']['LE'].items():
+#                 if isinstance(value, dict):
+#                     print(f"  {key}: {list(value.keys())}")
+#                 elif isinstance(value, list) or isinstance(value, np.ndarray):
+#                     print(f"  {key}: Array of shape {np.array(value).shape}")
+#                 else:
+#                     print(f"  {key}: {value}")
 
-# Example usage:
-frame_number = 0
-if frame_number in step_1_frames:
-    explore_frame_data(step_1_frames[frame_number])
+# # Example usage:
+# frame_number = 0
+# if frame_number in step_1_frames:
+#     explore_frame_data(step_1_frames[frame_number])
 
-# First, let's deeply inspect the model structure
-def detailed_model_inspection(model_structure):
-    print("\n===== DETAILED MODEL INSPECTION =====")
+# # First, let's deeply inspect the model structure
+# def detailed_model_inspection(model_structure):
+#     print("\n===== DETAILED MODEL INSPECTION =====")
     
-    # Check top level keys
-    print(f"Model structure keys: {model_structure.keys()}")
+#     # Check top level keys
+#     print(f"Model structure keys: {model_structure.keys()}")
     
-    # Check node coordinates
-    node_count = len(model_structure['node_coordinates'])
-    print(f"Number of nodes: {node_count}")
-    if node_count > 0:
-        sample_node_id = list(model_structure['node_coordinates'].keys())[0]
-        print(f"Sample node {sample_node_id}: {model_structure['node_coordinates'][sample_node_id]}")
+#     # Check node coordinates
+#     node_count = len(model_structure['node_coordinates'])
+#     print(f"Number of nodes: {node_count}")
+#     if node_count > 0:
+#         sample_node_id = list(model_structure['node_coordinates'].keys())[0]
+#         print(f"Sample node {sample_node_id}: {model_structure['node_coordinates'][sample_node_id]}")
     
-    # Check element connectivity
-    element_count = len(model_structure['element_connectivity'])
-    print(f"Number of elements: {element_count}")
-    if element_count > 0:
-        sample_elem_id = list(model_structure['element_connectivity'].keys())[0]
-        print(f"Sample element {sample_elem_id}: {model_structure['element_connectivity'][sample_elem_id]}")
+#     # Check element connectivity
+#     element_count = len(model_structure['element_connectivity'])
+#     print(f"Number of elements: {element_count}")
+#     if element_count > 0:
+#         sample_elem_id = list(model_structure['element_connectivity'].keys())[0]
+#         print(f"Sample element {sample_elem_id}: {model_structure['element_connectivity'][sample_elem_id]}")
     
-    # Check element sets
-    print(f"Element sets: {list(model_structure['element_sets'].keys())}")
-    for set_name, elements in model_structure['element_sets'].items():
-        print(f"  Set {set_name}: {len(elements)} elements")
-        if len(elements) > 0:
-            print(f"    First few elements: {elements[:5]}")
+#     # Check element sets
+#     print(f"Element sets: {list(model_structure['element_sets'].keys())}")
+#     for set_name, elements in model_structure['element_sets'].items():
+#         print(f"  Set {set_name}: {len(elements)} elements")
+#         if len(elements) > 0:
+#             print(f"    First few elements: {elements[:5]}")
             
-            # Check if these element IDs actually exist in element_connectivity
-            found = 0
-            for elem_id in elements[:5]:
-                if elem_id in model_structure['element_connectivity']:
-                    found += 1
-            print(f"    Elements found in connectivity: {found}/5")
+#             # Check if these element IDs actually exist in element_connectivity
+#             found = 0
+#             for elem_id in elements[:5]:
+#                 if elem_id in model_structure['element_connectivity']:
+#                     found += 1
+#             print(f"    Elements found in connectivity: {found}/5")
     
-    # Try to understand the structure of element_connectivity
-    if isinstance(model_structure['element_connectivity'], dict):
-        print("Element connectivity is a dictionary")
-        keys = list(model_structure['element_connectivity'].keys())
-        print(f"  First few keys: {keys[:5]}")
-        print(f"  Key type: {type(keys[0]) if keys else 'unknown'}")
-    else:
-        print(f"Element connectivity is a {type(model_structure['element_connectivity'])}")
+#     # Try to understand the structure of element_connectivity
+#     if isinstance(model_structure['element_connectivity'], dict):
+#         print("Element connectivity is a dictionary")
+#         keys = list(model_structure['element_connectivity'].keys())
+#         print(f"  First few keys: {keys[:5]}")
+#         print(f"  Key type: {type(keys[0]) if keys else 'unknown'}")
+#     else:
+#         print(f"Element connectivity is a {type(model_structure['element_connectivity'])}")
     
-    # See if the GM_CB element set contains valid elements
-    if 'GM_CB' in model_structure['element_sets']:
-        valid_count = 0
-        for elem_id in model_structure['element_sets']['GM_CB']:
-            if elem_id in model_structure['element_connectivity']:
-                valid_count += 1
-        print(f"Valid elements in GM_CB set: {valid_count}/{len(model_structure['element_sets']['GM_CB'])}")
+#     # See if the GM_CB element set contains valid elements
+#     if 'GM_CB' in model_structure['element_sets']:
+#         valid_count = 0
+#         for elem_id in model_structure['element_sets']['GM_CB']:
+#             if elem_id in model_structure['element_connectivity']:
+#                 valid_count += 1
+#         print(f"Valid elements in GM_CB set: {valid_count}/{len(model_structure['element_sets']['GM_CB'])}")
 
-# Run detailed inspection
-detailed_model_inspection(model_structure)
+# # Run detailed inspection
+# detailed_model_inspection(model_structure)
 
