@@ -20,6 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 
+
 # Abaqus specific
 *.rpy
 *.rpy.*
