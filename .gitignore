@@ -19,7 +19,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-*Output/nofalxnohemi0.5.pkl
+
 
 # Abaqus specific
 *.rpy
