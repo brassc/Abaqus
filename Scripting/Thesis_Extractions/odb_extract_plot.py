@@ -65,73 +65,6 @@ with gzip.open(model_structure_path, 'rb') as f:
         model_structure = pickle.load(f, encoding='latin1')
     print("Successfully loaded model structure")
 
-"""
-if step_1_dir.exists():
-    # Dictionary to store all frames
-    # List all frame files in the directory that match the pattern
-    frame_files = sorted(step_1_dir.glob("frame_00??.pkl.gz"))
-
-    for frame_path in frame_files:
-        frame_name = frame_path.name
-        frame_number = int(frame_name.split("_")[1].split(".")[0])
-
-        # Load the frame 
-        with gzip.open(frame_path, 'rb') as f:
-            try:
-                frame_data = pickle.load(f)
-            except:
-                f.seek(0)
-                frame_data = pickle.load(f, encoding='latin1')
-
-        # Store the frame in the dictionary
-        step_1_frames[frame_number] = frame_data
-        print(f"Loaded frame {frame_number:04d}")
-
-    print(f"Loaded {len(step_1_frames)} frames from {step_1_dir}")
-
-
-# Process Step-2 if it exists
-if step_2_dir.exists():
-    # List all frame files in the directory that match the pattern
-    frame_files = sorted(step_2_dir.glob("frame_00??.pkl.gz"))
-    
-    for frame_path in frame_files:
-        frame_name = frame_path.name
-        frame_number = int(frame_name.split("_")[1].split(".")[0])
-        
-        # Load the frame
-        with gzip.open(frame_path, 'rb') as f:
-            try:
-                frame_data = pickle.load(f)
-            except:
-                f.seek(0)
-                frame_data = pickle.load(f, encoding='latin1')
-        
-        # Store the frame in the dictionary
-        step_2_frames[frame_number] = frame_data
-        print(f"Loaded frame {frame_number:04d} from Step-2")
-    
-    print(f"Loaded {len(step_2_frames)} frames from {step_2_dir}")
-else:
-    print(f"Step 2 directory doesn't exist: {step_2_dir}")
-
-# Extract the data from the frames
-# print the keys of the model_structure
-print("Model Structure Keys:")
-print(model_structure.keys())
-# print the keys of the first frame
-print("Frame Keys:")
-print(step_1_frames[0].keys())
-# print the keys of the second frame
-print("Frame Keys:")
-print(step_1_frames[1].keys())
-# print the keys of the third frame
-print("Frame Keys:")
-print(step_1_frames[2].keys())
-"""
-
-
-
 # Explore the model structure
 print("\nModel Structure Keys:", model_structure.keys())
 
@@ -189,6 +122,7 @@ if step_2_dir.exists():
 
 ### plt model structure - NODES ONLY
 # Debugging function to check node structure
+
 def debug_node_structure(model_structure, max_nodes=5):
     """
     Debug function to examine the structure of node_coordinates
@@ -315,9 +249,8 @@ def visualize_large_model(model_structure, element_set_name='GM_CB', sample_rati
     else:
         print("No coordinates found for plotting")
         return False
-
 # Run the optimized visualization
-visualize_large_model(model_structure, sample_ratio=0.01)  # Use 1% sampling ratio
+#visualize_large_model(model_structure, sample_ratio=0.01)  # Use 1% sampling ratio
 
 def visualize_multi_angle(model_structure, element_set_name='GM_CB', sample_ratio=0.01):
     """
@@ -446,98 +379,187 @@ def visualize_multi_angle(model_structure, element_set_name='GM_CB', sample_rati
         print("No coordinates found for plotting")
         return False
 
-# Run the multi-angle visualization
-visualize_multi_angle(model_structure)
-
-
-
-
-
-sys.exit()
-
-# # Assume we've already loaded the data
-# # model_structure contains node coordinates and element connectivity
-# # step_1_frames and step_2_frames contain the field outputs (LE) for each frame
-
-# # First, let's inspect the structure of the field outputs
-# def explore_frame_data(frame_data):
-#     """Explore the structure of frame data to find where the field values are stored"""
-#     print("\nExploring frame data structure:")
-#     print(f"Top level keys: {frame_data.keys()}")
+# visualise LE data for the last frame of step 1
+def visualize_LE_data(model_structure, frame_data, element_set_name='GM_CB', sample_ratio=0.01, component=0):
+    """
+    Visualize the LE strain data for a given frame, mapped to the model coordinates
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    import random
     
-#     if 'field_outputs' in frame_data:
-#         print(f"Field output keys: {frame_data['field_outputs'].keys()}")
+    # Extract field data from the frame
+    field_outputs = frame_data.get('field_outputs', {})
+    LE_data = field_outputs.get('LE', {})
+    
+    if not LE_data or 'values' not in LE_data:
+        print("No valid LE data found in the frame")
+        return False
+    
+    # Get the strain values and component labels
+    strain_values = LE_data['values']
+    component_labels = LE_data.get('component_labels', [f'Component {i}' for i in range(6)])
+    
+    # Debug: Look at the strain values structure
+    if len(strain_values) > 0:
+        print(f"First strain value type: {type(strain_values[0])}")
+        print(f"First strain value: {strain_values[0]}")
+    
+    # Extract model structure
+    elements = model_structure['element_connectivity']
+    node_coordinates = model_structure['node_coordinates']
+    element_set = model_structure['element_sets'].get(element_set_name, [])
+    
+    # Group elements by part
+    part_elements = {}
+    for part_name, elem_id in element_set:
+        if part_name not in part_elements:
+            part_elements[part_name] = []
+        part_elements[part_name].append(elem_id)
+    
+    # Collect coordinates and strain values
+    points = []  # Will store [x, y, z, strain_value]
+    
+    # Sample elements
+    element_count = 0
+    for part_name, elem_ids in part_elements.items():
+        if part_name in elements and part_name in node_coordinates:
+            part_connectivity = elements[part_name]
+            part_nodes = node_coordinates[part_name]
+            
+            # Random sampling
+            sample_size = int(len(elem_ids) * sample_ratio)
+            if sample_size < 1:
+                sample_size = 1
+            
+            sampled_elem_ids = random.sample(elem_ids, min(sample_size, len(elem_ids)))
+            
+            for elem_id in sampled_elem_ids:
+                element_count += 1
+                
+                if elem_id in part_connectivity:
+                    # Get node coordinates
+                    node_ids = part_connectivity[elem_id]['connectivity']
+                    
+                    # Use the first node for visualization
+                    if node_ids and node_ids[0] in part_nodes:
+                        node_data = part_nodes[node_ids[0]]
+                        
+                        if isinstance(node_data, dict) and 'coordinates' in node_data:
+                            coords = node_data['coordinates']
+                            
+                            # Try to get a strain value for this element
+                            try:
+                                # This is just a heuristic - the exact mapping depends on your data
+                                strain_idx = (elem_id - 1) % len(strain_values)
+                                strain_value = strain_values[strain_idx]
+                                
+                                # Handle different types of strain values
+                                if isinstance(strain_value, dict):
+                                    # Extract from dictionary
+                                    if 'value' in strain_value:
+                                        strain_value = strain_value['value']
+                                    elif 'data' in strain_value:
+                                        strain_value = strain_value['data']
+                                
+                                # Handle numpy arrays
+                                if isinstance(strain_value, np.ndarray):
+                                    # If it's an array, select the component 
+                                    if component < strain_value.size:
+                                        strain_value = strain_value[component]
+                                    else:
+                                        strain_value = strain_value.mean()  # Fallback to mean
+                                
+                                # Final check to ensure we have a scalar value
+                                strain_value = float(strain_value)
+                                
+                                # Store the point
+                                points.append([
+                                    float(coords[0]), 
+                                    float(coords[1]), 
+                                    float(coords[2]), 
+                                    strain_value
+                                ])
+                            except (TypeError, ValueError, IndexError) as e:
+                                # Skip this point if there's an error
+                                continue
+    
+    print(f"Collected {len(points)} points with strain data from {element_count} elements")
+    
+    if points:
+        # Convert to numpy array
+        points_array = np.array(points)
         
-#         if 'LE' in frame_data['field_outputs']:
-#             print(f"LE structure: {frame_data['field_outputs']['LE'].keys()}")
-            
-#             # Print a sample of the first field output structure
-#             print("\nSample of LE field output structure:")
-#             for key, value in frame_data['field_outputs']['LE'].items():
-#                 if isinstance(value, dict):
-#                     print(f"  {key}: {list(value.keys())}")
-#                 elif isinstance(value, list) or isinstance(value, np.ndarray):
-#                     print(f"  {key}: Array of shape {np.array(value).shape}")
-#                 else:
-#                     print(f"  {key}: {value}")
-
-# # Example usage:
-# frame_number = 0
-# if frame_number in step_1_frames:
-#     explore_frame_data(step_1_frames[frame_number])
-
-# # First, let's deeply inspect the model structure
-# def detailed_model_inspection(model_structure):
-#     print("\n===== DETAILED MODEL INSPECTION =====")
-    
-#     # Check top level keys
-#     print(f"Model structure keys: {model_structure.keys()}")
-    
-#     # Check node coordinates
-#     node_count = len(model_structure['node_coordinates'])
-#     print(f"Number of nodes: {node_count}")
-#     if node_count > 0:
-#         sample_node_id = list(model_structure['node_coordinates'].keys())[0]
-#         print(f"Sample node {sample_node_id}: {model_structure['node_coordinates'][sample_node_id]}")
-    
-#     # Check element connectivity
-#     element_count = len(model_structure['element_connectivity'])
-#     print(f"Number of elements: {element_count}")
-#     if element_count > 0:
-#         sample_elem_id = list(model_structure['element_connectivity'].keys())[0]
-#         print(f"Sample element {sample_elem_id}: {model_structure['element_connectivity'][sample_elem_id]}")
-    
-#     # Check element sets
-#     print(f"Element sets: {list(model_structure['element_sets'].keys())}")
-#     for set_name, elements in model_structure['element_sets'].items():
-#         print(f"  Set {set_name}: {len(elements)} elements")
-#         if len(elements) > 0:
-#             print(f"    First few elements: {elements[:5]}")
-            
-#             # Check if these element IDs actually exist in element_connectivity
-#             found = 0
-#             for elem_id in elements[:5]:
-#                 if elem_id in model_structure['element_connectivity']:
-#                     found += 1
-#             print(f"    Elements found in connectivity: {found}/5")
-    
-#     # Try to understand the structure of element_connectivity
-#     if isinstance(model_structure['element_connectivity'], dict):
-#         print("Element connectivity is a dictionary")
-#         keys = list(model_structure['element_connectivity'].keys())
-#         print(f"  First few keys: {keys[:5]}")
-#         print(f"  Key type: {type(keys[0]) if keys else 'unknown'}")
-#     else:
-#         print(f"Element connectivity is a {type(model_structure['element_connectivity'])}")
-    
-#     # See if the GM_CB element set contains valid elements
-#     if 'GM_CB' in model_structure['element_sets']:
-#         valid_count = 0
-#         for elem_id in model_structure['element_sets']['GM_CB']:
-#             if elem_id in model_structure['element_connectivity']:
-#                 valid_count += 1
-#         print(f"Valid elements in GM_CB set: {valid_count}/{len(model_structure['element_sets']['GM_CB'])}")
-
-# # Run detailed inspection
-# detailed_model_inspection(model_structure)
-
+        # Extract coordinates and strain values
+        coordinates = points_array[:, :3]
+        strains = points_array[:, 3]
+        
+        # Downsample if needed
+        max_points = 20000
+        if len(coordinates) > max_points:
+            indices = np.random.choice(len(coordinates), max_points, replace=False)
+            coordinates = coordinates[indices]
+            strains = strains[indices]
+            print(f"Downsampled to {len(coordinates)} points for visualization")
+        
+        # Calculate bounds for strain values
+        vmin = np.min(strains)
+        vmax = np.max(strains)
+        print(f"Strain range: {vmin} to {vmax}")
+        
+        # Setup 3D plot
+        fig = plt.figure(figsize=(10, 8), dpi=100)
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Plot the points
+        scatter = ax.scatter(
+            coordinates[:, 0],
+            coordinates[:, 1],
+            coordinates[:, 2],
+            c=strains,
+            cmap='viridis',
+            marker='.',
+            s=5,
+            alpha=0.3,
+            vmin=vmin,
+            vmax=vmax
+        )
+        
+        # Calculate center for proper view
+        center = np.mean(coordinates, axis=0)
+        
+        # Set axis limits
+        radius = 100  # Adjust based on your model size
+        ax.set_xlim(center[0] - radius, center[0] + radius)
+        ax.set_ylim(center[1] - radius, center[1] + radius)
+        ax.set_zlim(center[2] - radius, center[2] + radius)
+        
+        # Set labels
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        
+        # Get component name
+        component_name = component_labels[component] if component < len(component_labels) else f"Component {component}"
+        
+        # Set title
+        plt.title(f'Strain Visualization - {component_name}')
+        
+        # Add colorbar
+        cbar = plt.colorbar(scatter, ax=ax, orientation='vertical')
+        cbar.set_label(component_name)
+        
+        # Save figure
+        plt.tight_layout()
+        plt.savefig(f'strain_{component_name.replace(" ", "_")}.png', dpi=150)
+        print(f"Strain visualization saved as strain_{component_name.replace(' ', '_')}.png")
+        
+        return True
+    else:
+        print("No valid points with strain data found")
+        return False
+# Example usage:
+# Visualize the first component (LE11) for the first frame
+if step_1_frames and 0 in step_1_frames:
+    visualize_LE_data(model_structure, step_1_frames[0], component=0)  # 0 = LE11
