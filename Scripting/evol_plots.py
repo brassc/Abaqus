@@ -20,7 +20,7 @@ def set_publication_style():
 		'savefig.dpi': 300,
 		'savefig.format': 'png',
 		'savefig.bbox': 'tight',
-		'axes.grid': True,
+		'axes.grid': False,
 		'grid.alpha': 0.3,
 		'grid.linestyle': '-',
 		'axes.spines.top': False,
@@ -30,6 +30,7 @@ def set_publication_style():
 # Define a base path
 base_path=Path.cwd()
 print(base_path)
+#sys.exit()
 
 thesis_chapter_path_vector = base_path.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Vector'
 thesis_chapter_path_raster = base_path.parent / 'Thesis' / 'phd-thesis-template-2.4' / 'Chapter3' / 'Figs' / 'Raster'
@@ -89,6 +90,7 @@ mesh_sizes=[3, 4, 5, 7, 10]
 
 # plotting peak EVOL vs mesh size
 plt.figure(figsize=(10,6))
+set_publication_style()
 #plt.scatter(mesh_sizes, [peak_3mm_evol, peak_5mm_evol, peak_10mm_evol], color='b', label='Peak EVOL')
 plt.scatter(mesh_sizes, [evol_3mm_frame25, evol_4mm_frame25, evol_5mm_frame25, evol_7mm_frame25, evol_10mm_frame25], color='b', label='EVOL at Frame 25', s=15)
 
@@ -112,7 +114,7 @@ plt.plot(evol_7mm['Frame'], evol_7mm['EVOL Sum'], color='c', label='7mm')
 plt.plot(evol_10mm['Frame'], evol_10mm['EVOL Sum'], color='y', label='10mm')
 plt.xlabel('Frame')
 plt.ylabel('Cerebrum Volume (mm³)')
-plt.xlim(1)
+plt.xlim(1,50)
 #plt.ylim(0)
 plt.title('Cerebrum Volume (mm³) over Time')
 plt.legend()
