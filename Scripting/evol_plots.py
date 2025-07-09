@@ -75,6 +75,13 @@ evol_5mm_frame25=evol_5mm.loc[index, 'EVOL Sum']
 evol_4mm_frame25=evol_4mm.loc[index, 'EVOL Sum']
 evol_3mm_frame25=evol_3mm.loc[index, 'EVOL Sum']
 
+# print(f"EVOL at Frame {index-1} for 10mm: {evol_10mm_frame25}")
+# print(f"EVOL at Frame {index-1} for 7mm: {evol_7mm_frame25}")
+# print(f"EVOL at Frame {index-1} for 5mm: {evol_5mm_frame25}")
+# print(f"EVOL at Frame {index-1} for 4mm: {evol_4mm_frame25}")
+# print(f"EVOL at Frame {index-1} for 3mm: {evol_3mm_frame25}")
+# sys.exit()
+
 
 #peak EVOL
 peak_10mm_evol=evol_10mm['EVOL Sum'].max()
@@ -117,7 +124,7 @@ plt.ylabel('Cerebrum Volume (mm³)')
 plt.xlim(1,50)
 #plt.ylim(0)
 plt.title('Cerebrum Volume (mm³) over Time')
-plt.legend()
+# plt.legend()
 plt.savefig(thesis_chapter_path_vector / 'cerebrum_vol_vs_time_more.png')
 plt.savefig(thesis_chapter_path_raster / 'cerebrum_vol_vs_time_more.png')
 plt.show()
