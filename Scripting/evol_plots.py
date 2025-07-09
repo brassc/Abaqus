@@ -9,13 +9,13 @@ def set_publication_style():
 		'font.family': 'serif',
 		'font.serif': ['Times New Roman'],
 		'mathtext.fontset': 'stix',
-		'font.size': 12,
+		'font.size': 14,
 		'axes.labelsize': 14,
 		'axes.titlesize': 16,
 		'axes.titleweight': 'bold', # This makes titles bold
-		'xtick.labelsize': 12,
-		'ytick.labelsize': 12,
-		'legend.fontsize': 10,
+		'xtick.labelsize': 14,
+		'ytick.labelsize': 14,
+		'legend.fontsize': 12,
 		'figure.dpi': 150,
 		'savefig.dpi': 300,
 		'savefig.format': 'png',
@@ -114,17 +114,17 @@ plt.show()
 # plotting EVOL vs time for each mesh
 plt.figure(figsize=(10,6))
 #plt.plot(evol_2mm['Frame'], evol_2mm['EVOL Sum'], color='r', label='2mm')
-plt.plot(evol_3mm['Frame'], evol_3mm['EVOL Sum'], color='g', label='3mm')
-plt.plot(evol_4mm['Frame'], evol_4mm['EVOL Sum'], color='m', label='4mm')
-plt.plot(evol_5mm['Frame'], evol_5mm['EVOL Sum'], color='b', label='5mm')
-plt.plot(evol_7mm['Frame'], evol_7mm['EVOL Sum'], color='c', label='7mm')
-plt.plot(evol_10mm['Frame'], evol_10mm['EVOL Sum'], color='y', label='10mm')
+plt.plot(evol_3mm['Frame'], evol_3mm['EVOL Sum'], color='g', label='3 mm')
+plt.plot(evol_4mm['Frame'], evol_4mm['EVOL Sum'], color='m', label='4 mm')
+plt.plot(evol_5mm['Frame'], evol_5mm['EVOL Sum'], color='b', label='5 mm')
+plt.plot(evol_7mm['Frame'], evol_7mm['EVOL Sum'], color='c', label='7 mm')
+plt.plot(evol_10mm['Frame'], evol_10mm['EVOL Sum'], color='y', label='10 mm')
 plt.xlabel('Frame')
 plt.ylabel('Cerebrum Volume (mm³)')
 plt.xlim(1,50)
 #plt.ylim(0)
 plt.title('Cerebrum Volume (mm³) over Time')
-# plt.legend()
+plt.legend()
 plt.savefig(thesis_chapter_path_vector / 'cerebrum_vol_vs_time_more.png')
 plt.savefig(thesis_chapter_path_raster / 'cerebrum_vol_vs_time_more.png')
 plt.show()
