@@ -47,6 +47,7 @@ os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
 execfile('sets_script.py')
 
 Option 1 - Single site (set variables before execfile):
+os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
 MODEL_NAME = 'N01-015_2026-02-09-scripting'
 INSTANCE_NAME = 'PART-1_1-1'
 CENTER_POINT = (-501.574E-03,-169.124924,-174.925827)
@@ -334,19 +335,20 @@ def create_sinusoidal_node_sets(
     # Create node sets for each band
     set_field_mapping = {}
 
+    # Get fresh references matching working kernel pattern exactly
+    m = mdb.models[model_name]
+    inst = m.rootAssembly.instances[instance_name]
+
     for i in range(num_bands):
         set_name = "{}_{:d}".format(set_prefix, i + 1)
-        node_labels = band_nodes[i]
+        labels = band_nodes[i]
 
-        if len(node_labels) > 0:
-            # Create the node set at assembly level
-            modelDB.rootAssembly.SetFromNodeLabels(
-                name=set_name,
-                nodeLabels=((instance.name, node_labels),)
-            )
+        if len(labels) > 0:
+            # Create the node set - EXACT pattern from working kernel test
+            m.rootAssembly.SetFromNodeLabels(name=set_name, nodeLabels=((inst.name, labels),))
             set_field_mapping[set_name] = field_values[i]
             print("Created '{}': {} nodes, field value = {:.3f}".format(
-                set_name, len(node_labels), field_values[i]))
+                set_name, len(labels), field_values[i]))
         else:
             print("Warning: Band {} has no nodes, skipping.".format(i + 1))
 
