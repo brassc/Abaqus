@@ -142,6 +142,7 @@ def main():
     plt.tight_layout()
     plt.savefig('field_band_distribution.pdf', dpi=300)                   
     print("Saved to field_band_distribution.pdf") 
+    plt.savefig(r'C:\Users\cmb247\repos\Paper-PhD-FE\figures\field_band_distribution.pdf', dpi=300)
     plt.close()
 
 
