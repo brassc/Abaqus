@@ -140,8 +140,8 @@ def main():
     ax.set_xticks([-100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100])
 
     plt.tight_layout()
-    plt.savefig('field_band_distribution.png')
-    print("Saved to field_band_distribution.png")
+    plt.savefig('field_band_distribution.pdf', dpi=300)                   
+    print("Saved to field_band_distribution.pdf") 
     plt.close()
 
 
