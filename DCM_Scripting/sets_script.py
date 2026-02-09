@@ -28,12 +28,12 @@ WHAT THIS SCRIPT DOES
    - Nodes outside the upper/lower limits are excluded
 
 4. CALCULATE SINUSOIDAL FIELD VALUES
-   - Band 1 (center): 0.147 - highest field value
-   - Band 2: 0.127
-   - Band 3: 0.097
-   - Band 4: 0.059
-   - Band 5 (edge): 0.020 - minimum field value
-   - Uses half-cosine profile for smooth transition
+   - Band 1 (center): 0.150 - peak field value
+   - Band 2: 0.128
+   - Band 3: 0.075
+   - Band 4: 0.022
+   - Band 5 (edge): 0.000 - minimum field value
+   - Uses raised cosine profile (zero gradient at center and edges)
 
 5. CREATE NODE SETS IN ABAQUS
    - Creates assembly-level node sets named <prefix>_BAND_1 through _BAND_5
@@ -199,7 +199,7 @@ def get_band_index(distance, d_upper, d_lower, num_bands=5):
     return band_index
 
 
-def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.01):
+def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.0):
     """
     Calculate sinusoidal field values for each band.
 
@@ -217,13 +217,15 @@ def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.01):
     amplitude = (peak_value - min_value)
 
     for i in range(num_bands):
-        # Position of band center as fraction from center (0) to edge (1)
-        # Band 0 centered at 10%, Band 1 at 30%, etc. for 5 bands
-        band_center = (2 * i + 1) / (2.0 * num_bands)
+        # Position as fraction from center (0) to edge (1)
+        # Band 1 = 0.0, Band 2 = 0.25, ..., Band 5 = 1.0
+        if num_bands == 1:
+            band_position = 0.0
+        else:
+            band_position = i / (num_bands - 1.0)
 
-        # Half-cosine: cos(0) = 1 at center, cos(pi/2) = 0 at edge
-        cos_value = math.cos(math.pi * band_center / 2.0)
-        field_value = amplitude * cos_value + min_value
+        # Raised cosine: gradient = 0 at both center and edge (smooth step)
+        field_value = amplitude * (1 + math.cos(math.pi * band_position)) / 2.0 + min_value
         field_values.append(round(field_value, 3))
 
     return field_values
