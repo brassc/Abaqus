@@ -238,7 +238,8 @@ def create_sinusoidal_node_sets(
     min_field_value=0.01,
     model_name='Model-1',
     instance_name='PART-1_1-1',
-    set_prefix='FIELD_BAND'
+    set_prefix='FIELD_BAND',
+    site_index=1
 ):
     """
     Create node sets with sinusoidal field distribution along an axis.
@@ -352,6 +353,18 @@ def create_sinusoidal_node_sets(
             set_field_mapping[set_name] = field_values[i]
             print("Created '{}': {} nodes, field value = {:.3f}".format(
                 set_name, len(node_labels), field_values[i]))
+
+            # Create predefined field for this node set
+            field_name = "predefinedfield-{:d}-fieldband{:d}".format(site_index, i + 1)
+            region = assembly.sets[set_name]
+            modelDB.Temperature(
+                name=field_name,
+                createStepName='Initial',
+                region=region,
+                magnitudes=(field_values[i],)
+            )
+            print("Created predefined field '{}' = {:.3f}".format(
+                field_name, field_values[i]))
         else:
             print("Warning: Band {} has no nodes, skipping.".format(i + 1))
 
@@ -359,18 +372,19 @@ def create_sinusoidal_node_sets(
     print("\n" + "="*50)
     print("SUMMARY: Node Sets and Field Values")
     print("="*50)
-    print("{:<20} {:>10} {:>15}".format("Node Set", "Nodes", "Field Value"))
-    print("-"*50)
+    print("{:<20} {:>10} {:>15} {:<30}".format("Node Set", "Nodes", "Field Value", "Predefined Field"))
+    print("-"*75)
     for i in range(num_bands):
         set_name = "{}_{:d}".format(set_prefix, i + 1)
+        field_name = "predefinedfield-{:d}-fieldband{:d}".format(site_index, i + 1)
         node_count = len(band_nodes[i])
-        print("{:<20} {:>10} {:>15.3f}".format(set_name, node_count, field_values[i]))
-    print("="*50)
-    return 
+        print("{:<20} {:>10} {:>15.3f} {:<30}".format(set_name, node_count, field_values[i], field_name))
+    print("="*75)
+     
     # Save the model
-    print("\nSaving model database...")
-    mdb.save()
-    print("Save complete.")
+    # print("\nSaving model database...")
+    # mdb.save()
+    # print("Save complete.")
 
     return set_field_mapping
 
@@ -397,8 +411,9 @@ print("sets_script.py loaded")
 # --- Check variables are set ---
 if 'MODEL_NAME' not in dir():
     print("")
-    print("ERROR: Variables not set. Usage:")
+    print("ERROR: MODEL_NAME not set. Usage:")
     print("")
+    print("  Option 1 - Single site:")
     print("    MODEL_NAME = 'Model-1'")
     print("    INSTANCE_NAME = 'PART-1_1-1'")
     print("    CENTER_POINT = (0.0, 0.0, 0.0)")
@@ -406,24 +421,61 @@ if 'MODEL_NAME' not in dir():
     print("    LOWER_POINT = (0.0, 0.0, -10.0)")
     print("    execfile('sets_script.py')")
     print("")
+    print("  Option 2 - Multiple sites from CSV:")
+    print("    MODEL_NAME = 'Model-1'")
+    print("    INSTANCE_NAME = 'PART-1_1-1'")
+    print("    COORDS_FILE = 'coordinates.csv'")
+    print("    execfile('sets_script.py')")
+    print("")
+
+elif 'COORDS_FILE' in dir():
+    # --- Multiple sites from CSV file ---
+    print("Model: " + MODEL_NAME)
+    print("Instance: " + INSTANCE_NAME)
+    print("Coordinates file: " + COORDS_FILE)
+
+    sites = read_coordinates_file(COORDS_FILE)
+    print("Found {} sites in CSV file".format(len(sites)))
+
+    for idx, site in enumerate(sites):
+        site_num = idx + 1
+        print("\n" + "#"*60)
+        print("SITE {}: {}".format(site_num, site['name']))
+        print("#"*60)
+        print("Center: {}".format(site['center']))
+        print("Upper: {}".format(site['upper']))
+        print("Lower: {}".format(site['lower']))
+
+        set_prefix = "{}_BAND".format(site['name'].upper().replace(' ', '_'))
+
+        create_sinusoidal_node_sets(
+            center_point=site['center'],
+            upper_point=site['upper'],
+            lower_point=site['lower'],
+            model_name=MODEL_NAME,
+            instance_name=INSTANCE_NAME,
+            set_prefix=set_prefix,
+            site_index=site_num
+        )
+
+    print("\nAll {} sites processed.".format(len(sites)))
 
 else:
-    # --- Print parameters ---
+    # --- Single site from variables ---
     print("Model: " + MODEL_NAME)
     print("Instance: " + INSTANCE_NAME)
     print("Center: {}".format(CENTER_POINT))
     print("Upper: {}".format(UPPER_POINT))
     print("Lower: {}".format(LOWER_POINT))
 
-    print('go to sinusoidal node sets func')
-    # --- Create node sets ---
     create_sinusoidal_node_sets(
         center_point=CENTER_POINT,
         upper_point=UPPER_POINT,
         lower_point=LOWER_POINT,
         model_name=MODEL_NAME,
         instance_name=INSTANCE_NAME,
-        set_prefix='FIELD_BAND'
+        set_prefix='FIELD_BAND',
+        site_index=1
     )
 
     print("Done")
