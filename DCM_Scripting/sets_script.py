@@ -43,8 +43,8 @@ WHAT THIS SCRIPT DOES
 USAGE
 -----
 Run in Abaqus CAE kernel:
-os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-execfile('sets_script.py')
+    os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+    execfile('sets_script.py')
 
 Option 1 - Single site (set variables before execfile):
 os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
@@ -53,7 +53,7 @@ INSTANCE_NAME = 'PART-1_1-1'
 CENTER_POINT = (-501.574E-03,-169.124924,-174.925827)
 UPPER_POINT = (-887.162E-03,-168.287567,-166.848785)
 LOWER_POINT = (-377.941E-03,-163.577835,-180.216278)
-execfile('sets_script.py')
+execfile('sets_script_old.py')
 
 Option 2 - Multiple sites from CSV file:
     MODEL_NAME = 'Model-1'
@@ -335,20 +335,23 @@ def create_sinusoidal_node_sets(
     # Create node sets for each band
     set_field_mapping = {}
 
-    # Get fresh references matching working kernel pattern exactly
-    m = mdb.models[model_name]
-    inst = m.rootAssembly.instances[instance_name]
-
     for i in range(num_bands):
         set_name = "{}_{:d}".format(set_prefix, i + 1)
-        labels = band_nodes[i]
+        node_labels = band_nodes[i]
 
-        if len(labels) > 0:
-            # Create the node set - EXACT pattern from working kernel test
-            m.rootAssembly.SetFromNodeLabels(name=set_name, nodeLabels=((inst.name, labels),))
+        if len(node_labels) > 0:
+            # Create the node set
+            # OLD: creates set under instance subcategory
+            # assembly.SetFromNodeLabels(
+            #     name=set_name,
+            #     nodeLabels=((instance_name, node_labels),)
+            # )
+            # NEW: creates set at assembly level
+            node_sequence = instance.nodes.sequenceFromLabels(node_labels)
+            assembly.Set(name=set_name, nodes=node_sequence)
             set_field_mapping[set_name] = field_values[i]
             print("Created '{}': {} nodes, field value = {:.3f}".format(
-                set_name, len(labels), field_values[i]))
+                set_name, len(node_labels), field_values[i]))
         else:
             print("Warning: Band {} has no nodes, skipping.".format(i + 1))
 
@@ -363,7 +366,7 @@ def create_sinusoidal_node_sets(
         node_count = len(band_nodes[i])
         print("{:<20} {:>10} {:>15.3f}".format(set_name, node_count, field_values[i]))
     print("="*50)
-    return
+    return 
     # Save the model
     print("\nSaving model database...")
     mdb.save()
