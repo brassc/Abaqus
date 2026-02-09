@@ -43,16 +43,16 @@ WHAT THIS SCRIPT DOES
 USAGE
 -----
 Run in Abaqus CAE kernel:
-    os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-    execfile('sets_script.py')
+os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+execfile('sets_script.py')
 
 Option 1 - Single site (set variables before execfile):
-    MODEL_NAME = 'Model-1'
-    INSTANCE_NAME = 'PART-1_1-1'
-    CENTER_POINT = (0.0, 0.0, 0.0)
-    UPPER_POINT = (0.0, 0.0, 10.0)
-    LOWER_POINT = (0.0, 0.0, -10.0)
-    execfile('sets_script.py')
+MODEL_NAME = 'N01-015_2026-02-09-scripting'
+INSTANCE_NAME = 'PART-1_1-1'
+CENTER_POINT = (-501.574E-03,-169.124924,-174.925827)
+UPPER_POINT = (-887.162E-03,-168.287567,-166.848785)
+LOWER_POINT = (-377.941E-03,-163.577835,-180.216278)
+execfile('sets_script.py')
 
 Option 2 - Multiple sites from CSV file:
     MODEL_NAME = 'Model-1'
@@ -339,15 +339,11 @@ def create_sinusoidal_node_sets(
         node_labels = band_nodes[i]
 
         if len(node_labels) > 0:
-            # Create the node set
-            # OLD: creates set under instance subcategory
-            # assembly.SetFromNodeLabels(
-            #     name=set_name,
-            #     nodeLabels=((instance_name, node_labels),)
-            # )
-            # NEW: creates set at assembly level
-            node_sequence = instance.nodes.sequenceFromLabels(node_labels)
-            assembly.Set(name=set_name, nodes=node_sequence)
+            # Create the node set at assembly level
+            modelDB.rootAssembly.SetFromNodeLabels(
+                name=set_name,
+                nodeLabels=((instance.name, node_labels),)
+            )
             set_field_mapping[set_name] = field_values[i]
             print("Created '{}': {} nodes, field value = {:.3f}".format(
                 set_name, len(node_labels), field_values[i]))
@@ -365,7 +361,7 @@ def create_sinusoidal_node_sets(
         node_count = len(band_nodes[i])
         print("{:<20} {:>10} {:>15.3f}".format(set_name, node_count, field_values[i]))
     print("="*50)
-    return 
+    return
     # Save the model
     print("\nSaving model database...")
     mdb.save()
