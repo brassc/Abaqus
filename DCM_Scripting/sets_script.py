@@ -370,37 +370,20 @@ def create_sinusoidal_node_sets(
 
 print("sets_script.py loaded")
 
-# --- Check all required variables are set ---
-required = ['MODEL_NAME', 'INSTANCE_NAME', 'CENTER_POINT', 'UPPER_POINT', 'LOWER_POINT']
-missing = [v for v in required if v not in dir()]
 
-if missing:
-    print("")
-    print("="*60)
-    print("MISSING VARIABLES: " + ", ".join(missing))
-    print("="*60)
-    print("")
-    print("Usage: Set these in the Abaqus kernel before execfile():")
-    print("")
-    print("    MODEL_NAME = 'Model-1'")
-    print("    INSTANCE_NAME = 'PART-1_1-1'")
-    print("    CENTER_POINT = (0.0, 0.0, 0.0)")
-    print("    UPPER_POINT = (0.0, 0.0, 10.0)")
-    print("    LOWER_POINT = (0.0, 0.0, -10.0)")
-    print("    execfile('sets_script.py')")
-    print("")
-    print("="*60)
+
+# --- Check variables are set ---
+if 'MODEL_NAME' not in dir():
+    print("ERROR: Set MODEL_NAME, INSTANCE_NAME, CENTER_POINT, UPPER_POINT, LOWER_POINT before running")
+    
 else:
     # --- Print parameters ---
-    print("")
-    print("Parameters:")
-    print("  Model:    " + MODEL_NAME)
-    print("  Instance: " + INSTANCE_NAME)
-    print("  Center:   {}".format(CENTER_POINT))
-    print("  Upper:    {}".format(UPPER_POINT))
-    print("  Lower:    {}".format(LOWER_POINT))
-    print("")
-
+    print("Model: " + MODEL_NAME)
+    print("Instance: " + INSTANCE_NAME)
+    print("Center: {}".format(CENTER_POINT))
+    print("Upper: {}".format(UPPER_POINT))
+    print("Lower: {}".format(LOWER_POINT))
+"""
     # --- Create node sets ---
     create_sinusoidal_node_sets(
         center_point=CENTER_POINT,
@@ -412,3 +395,6 @@ else:
     )
 
     print("Done")
+
+    
+    """
