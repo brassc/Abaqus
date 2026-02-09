@@ -1,0 +1,282 @@
+"""
+Spinal Cord Node Set Creation Script
+Creates node sets with sinusoidal predefined field distribution.
+
+Selects all nodes from the specified part instance and classifies them
+into bands based on their position along an axis defined by three points.
+
+Run in Abaqus CAE kernel:
+    os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+    execfile('sets_script.py')
+
+Python 2.7 compatible (Abaqus Python)
+"""
+
+from abaqus import *
+from abaqusConstants import *
+import math
+
+
+def dot_product(v1, v2):
+    """Calculate dot product of two 3D vectors."""
+    return v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2]
+
+
+def vector_magnitude(v):
+    """Calculate magnitude of a 3D vector."""
+    return math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+
+
+def normalize_vector(v):
+    """Normalize a 3D vector to unit length."""
+    mag = vector_magnitude(v)
+    if mag == 0:
+        return (0, 0, 0)
+    return (v[0]/mag, v[1]/mag, v[2]/mag)
+
+
+def calculate_axis_projection(point, axis_vector, axis_origin):
+    """
+    Project a point onto an axis and return signed distance from origin along axis.
+
+    Parameters:
+        point: (x, y, z) coordinates of the point
+        axis_vector: normalized (dx, dy, dz) direction vector of the axis
+        axis_origin: (x, y, z) point on the axis (used as origin for distance)
+
+    Returns:
+        float: signed distance along the axis from origin
+    """
+    # Vector from axis origin to point
+    to_point = (
+        point[0] - axis_origin[0],
+        point[1] - axis_origin[1],
+        point[2] - axis_origin[2]
+    )
+    # Project onto axis (dot product with unit axis vector)
+    return dot_product(to_point, axis_vector)
+
+
+def get_band_index(distance, d_upper, d_lower, num_bands=5):
+    """
+    Determine which band (0 to num_bands-1) a node belongs to based on distance from center.
+
+    Band 0 is the center band (highest field value).
+    Band num_bands-1 is the edge band (lowest field value).
+
+    Parameters:
+        distance: signed distance from center along axis
+        d_upper: distance from center to upper limit (positive)
+        d_lower: distance from center to lower limit (negative)
+        num_bands: number of bands to create
+
+    Returns:
+        int: band index (0 to num_bands-1), or -1 if outside region
+    """
+    # Check if node is within the region
+    if distance > d_upper or distance < d_lower:
+        return -1
+
+    # Normalize distance to [0, 1] range based on which side of center
+    if distance >= 0:
+        # Upper half
+        if d_upper == 0:
+            normalized = 0
+        else:
+            normalized = abs(distance) / abs(d_upper)
+    else:
+        # Lower half
+        if d_lower == 0:
+            normalized = 0
+        else:
+            normalized = abs(distance) / abs(d_lower)
+
+    # Map normalized distance to band index
+    # Band 0: 0-20%, Band 1: 20-40%, etc.
+    band_width = 1.0 / num_bands
+    band_index = int(normalized / band_width)
+
+    # Clamp to valid range (handle edge case where normalized == 1.0)
+    if band_index >= num_bands:
+        band_index = num_bands - 1
+
+    return band_index
+
+
+def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.01):
+    """
+    Calculate sinusoidal field values for each band.
+
+    Uses half-cosine profile scaled between peak_value (center) and min_value (edge).
+
+    Parameters:
+        num_bands: number of bands
+        peak_value: field value at center (band 0)
+        min_value: field value at edge (band num_bands-1)
+
+    Returns:
+        list: field values for each band
+    """
+    field_values = []
+    amplitude = (peak_value - min_value)
+
+    for i in range(num_bands):
+        # Position of band center as fraction from center (0) to edge (1)
+        # Band 0 centered at 10%, Band 1 at 30%, etc. for 5 bands
+        band_center = (2 * i + 1) / (2.0 * num_bands)
+
+        # Half-cosine: cos(0) = 1 at center, cos(pi/2) = 0 at edge
+        cos_value = math.cos(math.pi * band_center / 2.0)
+        field_value = amplitude * cos_value + min_value
+        field_values.append(round(field_value, 3))
+
+    return field_values
+
+
+def create_sinusoidal_node_sets(
+    center_point,
+    upper_point,
+    lower_point,
+    num_bands=5,
+    peak_field_value=0.15,
+    min_field_value=0.01,
+    instance_name='PART-1_1-1',
+    set_prefix='FIELD_BAND'
+):
+    """
+    Create node sets with sinusoidal field distribution along an axis.
+
+    Selects all nodes from the specified instance and classifies them into bands.
+
+    Parameters:
+        center_point: (x1, y1, z1) center of the region (peak field value)
+        upper_point: (x2, y2, z2) upper limit of the region
+        lower_point: (x3, y3, z3) lower limit of the region
+        num_bands: number of bands to create (default 5)
+        peak_field_value: field value at center (default 0.15)
+        min_field_value: field value at edges (default 0.01)
+        instance_name: name of the part instance (default 'PART-1_1-1')
+        set_prefix: prefix for node set names (default 'FIELD_BAND')
+
+    Returns:
+        dict: mapping of set names to field values
+    """
+    # Get the model database
+    modelDB = mdb.models['Model-1']
+    assembly = modelDB.rootAssembly
+
+    # Calculate axis vector (from lower to upper)
+    axis_vector = (
+        upper_point[0] - lower_point[0],
+        upper_point[1] - lower_point[1],
+        upper_point[2] - lower_point[2]
+    )
+    axis_vector = normalize_vector(axis_vector)
+
+    # Calculate distances from center to upper and lower limits
+    d_upper = calculate_axis_projection(upper_point, axis_vector, center_point)
+    d_lower = calculate_axis_projection(lower_point, axis_vector, center_point)
+
+    print("Axis vector: ({:.3f}, {:.3f}, {:.3f})".format(*axis_vector))
+    print("Distance to upper limit: {:.3f}".format(d_upper))
+    print("Distance to lower limit: {:.3f}".format(d_lower))
+
+    # Get all nodes from the instance
+    try:
+        instance = assembly.instances[instance_name]
+        all_nodes = instance.nodes
+        print("Found {} nodes in instance '{}'".format(len(all_nodes), instance_name))
+    except KeyError:
+        print("Error: Instance '{}' not found in assembly.".format(instance_name))
+        print("Available instances: {}".format(list(assembly.instances.keys())))
+        return None
+
+    # Initialize lists for each band
+    band_nodes = [[] for _ in range(num_bands)]
+    nodes_outside = 0
+
+    # Classify each node into a band
+    print("Classifying nodes into {} bands...".format(num_bands))
+    for node in all_nodes:
+        coords = node.coordinates
+        distance = calculate_axis_projection(coords, axis_vector, center_point)
+        band_idx = get_band_index(distance, d_upper, d_lower, num_bands)
+
+        if band_idx >= 0:
+            band_nodes[band_idx].append(node.label)
+        else:
+            nodes_outside += 1
+
+    print("Nodes outside region: {}".format(nodes_outside))
+
+    # Calculate field values for each band
+    field_values = calculate_field_values(num_bands, peak_field_value, min_field_value)
+
+    # Create node sets for each band
+    set_field_mapping = {}
+
+    for i in range(num_bands):
+        set_name = "{}_{:d}".format(set_prefix, i + 1)
+        node_labels = band_nodes[i]
+
+        if len(node_labels) > 0:
+            # Create the node set
+            assembly.SetFromNodeLabels(
+                name=set_name,
+                nodeLabels=((instance_name, node_labels),)
+            )
+            set_field_mapping[set_name] = field_values[i]
+            print("Created '{}': {} nodes, field value = {:.3f}".format(
+                set_name, len(node_labels), field_values[i]))
+        else:
+            print("Warning: Band {} has no nodes, skipping.".format(i + 1))
+
+    # Print summary table
+    print("\n" + "="*50)
+    print("SUMMARY: Node Sets and Field Values")
+    print("="*50)
+    print("{:<20} {:>10} {:>15}".format("Node Set", "Nodes", "Field Value"))
+    print("-"*50)
+    for i in range(num_bands):
+        set_name = "{}_{:d}".format(set_prefix, i + 1)
+        node_count = len(band_nodes[i])
+        print("{:<20} {:>10} {:>15.3f}".format(set_name, node_count, field_values[i]))
+    print("="*50)
+
+    # Save the model
+    print("\nSaving model database...")
+    mdb.save()
+    print("Save complete.")
+
+    return set_field_mapping
+
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+if __name__ == "__main__":
+    # Example usage - modify these parameters for your model
+
+    # Define the three coordinate points
+    CENTER_POINT = (0.0, 0.0, 0.0)    # (x1, y1, z1) - center of region
+    UPPER_POINT = (0.0, 0.0, 10.0)    # (x2, y2, z2) - upper limit
+    LOWER_POINT = (0.0, 0.0, -10.0)   # (x3, y3, z3) - lower limit
+
+    # Instance name in your model
+    INSTANCE_NAME = 'PART-1_1-1'
+
+    # Create the node sets (uses all nodes from the instance)
+    result = create_sinusoidal_node_sets(
+        center_point=CENTER_POINT,
+        upper_point=UPPER_POINT,
+        lower_point=LOWER_POINT,
+        num_bands=5,
+        peak_field_value=0.15,
+        min_field_value=0.01,
+        instance_name=INSTANCE_NAME,
+        set_prefix='FIELD_BAND'
+    )
+
+    if result:
+        print("\nNode sets created successfully!")
+        print("Use the field values above when defining predefined fields in Abaqus.")
