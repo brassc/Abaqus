@@ -266,6 +266,10 @@ def create_sinusoidal_node_sets(
         print("Available models: {}".format(list(mdb.models.keys())))
         return None
     assembly = modelDB.rootAssembly
+    
+    
+    print('assembly loaded')
+    
 
     # Calculate axis vector (from lower to upper)
     axis_vector = (
@@ -275,6 +279,11 @@ def create_sinusoidal_node_sets(
     )
     axis_vector = normalize_vector(axis_vector)
 
+    # print('axis vector calculated:')
+    # print(axis_vector)
+
+    
+
     # Calculate distances from center to upper and lower limits
     d_upper = calculate_axis_projection(upper_point, axis_vector, center_point)
     d_lower = calculate_axis_projection(lower_point, axis_vector, center_point)
@@ -282,6 +291,8 @@ def create_sinusoidal_node_sets(
     print("Axis vector: ({:.3f}, {:.3f}, {:.3f})".format(*axis_vector))
     print("Distance to upper limit: {:.3f}".format(d_upper))
     print("Distance to lower limit: {:.3f}".format(d_lower))
+
+    
 
     # Get all nodes from the instance
     try:
@@ -292,6 +303,8 @@ def create_sinusoidal_node_sets(
         print("Error: Instance '{}' not found in assembly.".format(instance_name))
         print("Available instances: {}".format(list(assembly.instances.keys())))
         return None
+
+    
 
     # Initialize lists for each band
     band_nodes = [[] for _ in range(num_bands)]
@@ -311,8 +324,12 @@ def create_sinusoidal_node_sets(
 
     print("Nodes outside region: {}".format(nodes_outside))
 
+    
+
     # Calculate field values for each band
     field_values = calculate_field_values(num_bands, peak_field_value, min_field_value)
+    # print('field values calculated')
+    
 
     # Create node sets for each band
     set_field_mapping = {}
@@ -323,10 +340,14 @@ def create_sinusoidal_node_sets(
 
         if len(node_labels) > 0:
             # Create the node set
-            assembly.SetFromNodeLabels(
-                name=set_name,
-                nodeLabels=((instance_name, node_labels),)
-            )
+            # OLD: creates set under instance subcategory
+            # assembly.SetFromNodeLabels(
+            #     name=set_name,
+            #     nodeLabels=((instance_name, node_labels),)
+            # )
+            # NEW: creates set at assembly level
+            node_sequence = instance.nodes.sequenceFromLabels(node_labels)
+            assembly.Set(name=set_name, nodes=node_sequence)
             set_field_mapping[set_name] = field_values[i]
             print("Created '{}': {} nodes, field value = {:.3f}".format(
                 set_name, len(node_labels), field_values[i]))
@@ -344,7 +365,7 @@ def create_sinusoidal_node_sets(
         node_count = len(band_nodes[i])
         print("{:<20} {:>10} {:>15.3f}".format(set_name, node_count, field_values[i]))
     print("="*50)
-
+    return 
     # Save the model
     print("\nSaving model database...")
     mdb.save()
@@ -374,8 +395,17 @@ print("sets_script.py loaded")
 
 # --- Check variables are set ---
 if 'MODEL_NAME' not in dir():
-    print("ERROR: Set MODEL_NAME, INSTANCE_NAME, CENTER_POINT, UPPER_POINT, LOWER_POINT before running")
-    
+    print("")
+    print("ERROR: Variables not set. Usage:")
+    print("")
+    print("    MODEL_NAME = 'Model-1'")
+    print("    INSTANCE_NAME = 'PART-1_1-1'")
+    print("    CENTER_POINT = (0.0, 0.0, 0.0)")
+    print("    UPPER_POINT = (0.0, 0.0, 10.0)")
+    print("    LOWER_POINT = (0.0, 0.0, -10.0)")
+    print("    execfile('sets_script.py')")
+    print("")
+
 else:
     # --- Print parameters ---
     print("Model: " + MODEL_NAME)
@@ -383,7 +413,8 @@ else:
     print("Center: {}".format(CENTER_POINT))
     print("Upper: {}".format(UPPER_POINT))
     print("Lower: {}".format(LOWER_POINT))
-"""
+
+    print('go to sinusoidal node sets func')
     # --- Create node sets ---
     create_sinusoidal_node_sets(
         center_point=CENTER_POINT,
@@ -397,4 +428,4 @@ else:
     print("Done")
 
     
-    """
+    
