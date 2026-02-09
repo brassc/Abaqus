@@ -354,134 +354,61 @@ def create_sinusoidal_node_sets(
 
 
 # =============================================================================
-# MAIN EXECUTION
+# SCRIPT STARTS HERE
+# =============================================================================
+#
+# Usage: Set variables in Abaqus kernel, then execfile()
+#
+#   MODEL_NAME = 'Model-1'
+#   INSTANCE_NAME = 'PART-1_1-1'
+#   CENTER_POINT = (0.0, 0.0, 0.0)
+#   UPPER_POINT = (0.0, 0.0, 10.0)
+#   LOWER_POINT = (0.0, 0.0, -10.0)
+#   execfile('sets_script.py')
+#
 # =============================================================================
 
-# Check which mode: single site or multi-site from file
-use_file_mode = 'COORDS_FILE' in dir()
-base_vars = ['MODEL_NAME', 'INSTANCE_NAME']
-single_site_vars = ['CENTER_POINT', 'UPPER_POINT', 'LOWER_POINT']
+print("sets_script.py loaded")
 
-missing_base = [var for var in base_vars if var not in dir()]
+# --- Check all required variables are set ---
+required = ['MODEL_NAME', 'INSTANCE_NAME', 'CENTER_POINT', 'UPPER_POINT', 'LOWER_POINT']
+missing = [v for v in required if v not in dir()]
 
-if missing_base:
-    print("\n" + "="*60)
-    print("ERROR: Required parameters not set.")
+if missing:
+    print("")
     print("="*60)
-    print("\nMissing: {}".format(', '.join(missing_base)))
-    print("\nOption 1 - Single site:")
-    print("-"*60)
-    print("MODEL_NAME = 'Model-1'")
-    print("INSTANCE_NAME = 'PART-1_1-1'")
-    print("CENTER_POINT = (0.0, 0.0, 0.0)")
-    print("UPPER_POINT = (0.0, 0.0, 10.0)")
-    print("LOWER_POINT = (0.0, 0.0, -10.0)")
-    print("execfile('sets_script.py')")
-    print("\nOption 2 - Multiple sites from CSV:")
-    print("-"*60)
-    print("MODEL_NAME = 'Model-1'")
-    print("INSTANCE_NAME = 'PART-1_1-1'")
-    print("COORDS_FILE = 'coordinates.csv'")
-    print("execfile('sets_script.py')")
-    print("-"*60)
-
-elif use_file_mode:
-    # Multi-site mode: read from CSV file
-    print("\n" + "="*60)
-    print("Sinusoidal Node Set Creation (Multi-Site Mode)")
+    print("MISSING VARIABLES: " + ", ".join(missing))
     print("="*60)
-    print("Model:    {}".format(MODEL_NAME))
-    print("Instance: {}".format(INSTANCE_NAME))
-    print("File:     {}".format(COORDS_FILE))
+    print("")
+    print("Usage: Set these in the Abaqus kernel before execfile():")
+    print("")
+    print("    MODEL_NAME = 'Model-1'")
+    print("    INSTANCE_NAME = 'PART-1_1-1'")
+    print("    CENTER_POINT = (0.0, 0.0, 0.0)")
+    print("    UPPER_POINT = (0.0, 0.0, 10.0)")
+    print("    LOWER_POINT = (0.0, 0.0, -10.0)")
+    print("    execfile('sets_script.py')")
+    print("")
     print("="*60)
-
-    # Read sites from file
-    sites = read_coordinates_file(COORDS_FILE)
-    print("\nFound {} compression sites:".format(len(sites)))
-    for site in sites:
-        print("  - {}: center={}, upper={}, lower={}".format(
-            site['name'], site['center'], site['upper'], site['lower']))
-
-    raw_input("\nPress Enter to confirm and create node sets for all sites...")
-
-    # Process each site
-    all_results = {}
-    for site in sites:
-        print("\n" + "-"*60)
-        print("Processing site: {}".format(site['name']))
-        print("-"*60)
-
-        result = create_sinusoidal_node_sets(
-            center_point=site['center'],
-            upper_point=site['upper'],
-            lower_point=site['lower'],
-            num_bands=5,
-            peak_field_value=0.15,
-            min_field_value=0.01,
-            model_name=MODEL_NAME,
-            instance_name=INSTANCE_NAME,
-            set_prefix=site['name'] + '_BAND'
-        )
-
-        if result:
-            all_results[site['name']] = result
-
-    print("\n" + "="*60)
-    print("ALL SITES COMPLETE")
-    print("="*60)
-    print("Created node sets for {} sites.".format(len(all_results)))
-
 else:
-    # Single site mode: check for coordinate variables
-    missing_coords = [var for var in single_site_vars if var not in dir()]
+    # --- Print parameters ---
+    print("")
+    print("Parameters:")
+    print("  Model:    " + MODEL_NAME)
+    print("  Instance: " + INSTANCE_NAME)
+    print("  Center:   {}".format(CENTER_POINT))
+    print("  Upper:    {}".format(UPPER_POINT))
+    print("  Lower:    {}".format(LOWER_POINT))
+    print("")
 
-    if missing_coords:
-        print("\n" + "="*60)
-        print("ERROR: Coordinate parameters not set.")
-        print("="*60)
-        print("\nMissing: {}".format(', '.join(missing_coords)))
-        print("\nOption 1 - Single site:")
-        print("-"*60)
-        print("MODEL_NAME = 'Model-1'")
-        print("INSTANCE_NAME = 'PART-1_1-1'")
-        print("CENTER_POINT = (0.0, 0.0, 0.0)")
-        print("UPPER_POINT = (0.0, 0.0, 10.0)")
-        print("LOWER_POINT = (0.0, 0.0, -10.0)")
-        print("execfile('sets_script.py')")
-        print("\nOption 2 - Multiple sites from CSV:")
-        print("-"*60)
-        print("MODEL_NAME = 'Model-1'")
-        print("INSTANCE_NAME = 'PART-1_1-1'")
-        print("COORDS_FILE = 'coordinates.csv'")
-        print("execfile('sets_script.py')")
-        print("-"*60)
-    else:
-        # Display current parameters and confirm
-        print("\n" + "="*60)
-        print("Sinusoidal Node Set Creation (Single Site Mode)")
-        print("="*60)
-        print("Model:    {}".format(MODEL_NAME))
-        print("Instance: {}".format(INSTANCE_NAME))
-        print("Center:   {}".format(CENTER_POINT))
-        print("Upper:    {}".format(UPPER_POINT))
-        print("Lower:    {}".format(LOWER_POINT))
-        print("="*60)
+    # --- Create node sets ---
+    create_sinusoidal_node_sets(
+        center_point=CENTER_POINT,
+        upper_point=UPPER_POINT,
+        lower_point=LOWER_POINT,
+        model_name=MODEL_NAME,
+        instance_name=INSTANCE_NAME,
+        set_prefix='FIELD_BAND'
+    )
 
-        raw_input("Press Enter to confirm and create node sets...")
-
-        # Create the node sets
-        result = create_sinusoidal_node_sets(
-            center_point=CENTER_POINT,
-            upper_point=UPPER_POINT,
-            lower_point=LOWER_POINT,
-            num_bands=5,
-            peak_field_value=0.15,
-            min_field_value=0.01,
-            model_name=MODEL_NAME,
-            instance_name=INSTANCE_NAME,
-            set_prefix='FIELD_BAND'
-        )
-
-        if result:
-            print("\nNode sets created successfully!")
-            print("Use the field values above when defining predefined fields in Abaqus.")
+    print("Done")
