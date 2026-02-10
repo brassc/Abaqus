@@ -1,3 +1,5 @@
+For DCM Scripting, see README.md in DCM scripting folder. 
+
 # Scripting for node set generation (selection of nodes inside a spherical area)
 `nodes*` or `list*` `file*` or `main.py` scripts.
 This set of programs exports a node set from Abaqus as comma separated list in a .txt file. 
