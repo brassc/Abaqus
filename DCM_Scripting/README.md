@@ -43,9 +43,9 @@ Field values follow a **raised cosine** (smooth step) profile along the compress
 value = (peak - min) * (1 + cos(pi * x)) / 2 + min
 ```
 
-where `x = band_index / num_bands`. For 5 bands this gives 6 evenly spaced points from `x = 0` to `x = 1.0`, mapping to 0% to 120% of the physical compression region. Only the first 5 points get node sets and predefined fields; the 6th is a virtual zero-crossing beyond the region boundary.
+where `x = band_index / num_bands`. For 5 bands this gives 6 evenly spaced points from `x = 0` to `x = 1.0`, mapping to 0% to 120% of the physical compression region, set by input coordinates.  Only the first 5 points get node sets and predefined fields; the 6th is a virtual zero-crossing beyond the region boundary.
 
-The raised cosine has **zero gradient at both ends** (flat at center, flat at zero-crossing), giving a smooth step identical to the Abaqus smooth step amplitude definition.
+The raised cosine has zero gradient at centre point of indentation and at the edge ($x$ intercept) at 120% of the distance. This gives a smooth step akin to the Abaqus smooth step amplitude definition.
 
 With `peak = 0.15`, `min = 0.0`:
 
