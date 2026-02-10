@@ -24,11 +24,9 @@ def set_publication_style():
 def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.0):
     positions = []
     values = []
+    num_points = num_bands + 1  # cosine reaches 0 at the virtual (num_bands+1)th point
     for i in range(num_bands):
-        if num_bands == 1:
-            pos = 0.0
-        else:
-            pos = i / (num_bands - 1.0)
+        pos = i / (num_points - 1.0)  # 0, 0.2, 0.4, 0.6, 0.8 for 5 bands
         # Raised cosine: gradient = 0 at both center and edge (smooth step)
         field_val = (peak_value - min_value) * (1 + math.cos(math.pi * pos)) / 2.0 + min_value
         positions.append(pos)
@@ -48,9 +46,17 @@ def main():
     # Band edges (each band spans 20% of the region)
     band_width = 1.0 / num_bands
 
-    # Smooth cosine curve (full symmetric profile: -100% to +100%)
-    x_curve = np.linspace(-1, 1, 400)
-    y_curve = (peak - min_val) * (1 + np.cos(np.pi * np.abs(x_curve))) / 2.0 + min_val
+    # Smooth cosine curve (full symmetric profile, cosine reaches 0 at 120%)
+    # cos(pi * |x| / 1.2) maps physical distance to raised cosine
+    extent = 1.2  # cosine zero-crossing at 120% of physical region
+    # Physical region: -100% to +100% (solid line)
+    x_solid = np.linspace(-1, 1, 400)
+    y_solid = (peak - min_val) * (1 + np.cos(np.pi * np.abs(x_solid) / extent)) / 2.0 + min_val
+    # Extension to 120% where cosine reaches 0 (dashed line)
+    x_ext_pos = np.linspace(1, extent, 50)
+    x_ext_neg = np.linspace(-extent, -1, 50)
+    y_ext_pos = (peak - min_val) * (1 + np.cos(np.pi * x_ext_pos / extent)) / 2.0 + min_val
+    y_ext_neg = (peak - min_val) * (1 + np.cos(np.pi * np.abs(x_ext_neg) / extent)) / 2.0 + min_val
 
     # Colours for each band (edge to center to edge)
     colours = ['#2166ac', '#67a9cf', '#d1e5f0', '#fddbc7', '#ef8a62']
@@ -92,18 +98,22 @@ def main():
             zorder=2
         )
 
-    # Sinusoid curve
+    # Sinusoid curve (solid within physical region)
     ax.plot(
-        x_curve * 100, y_curve,
+        x_solid * 100, y_solid,
         color='black', linewidth=1.8, linestyle='-',
-        label='Sinusoid profile',
+        label='Raised cosine profile',
         zorder=3
     )
+    # Dashed extension to 120% where cosine reaches 0
+    ax.plot(x_ext_pos * 100, y_ext_pos, color='black', linewidth=1.2, linestyle='--', zorder=3)
+    ax.plot(x_ext_neg * 100, y_ext_neg, color='black', linewidth=1.2, linestyle='--', zorder=3)
 
     # Sample points on the curve (both sides)
+    # band_positions are in cosine space (0 to 1 = 0% to 120%); scale to physical %
     for i in range(num_bands):
-        pos_x = band_positions[i] * 100
-        neg_x = -band_positions[i] * 100
+        pos_x = band_positions[i] * 120
+        neg_x = -band_positions[i] * 120
         # Positive side
         ax.plot(
             pos_x, band_values[i],
@@ -134,10 +144,10 @@ def main():
     ax.set_xlabel('Distance from Centre (%)')
     ax.set_ylabel('Field Amplitude')
     ax.set_title('Sinusoidal Predefined Field Distribution')
-    ax.set_xlim(-105, 105)
+    ax.set_xlim(-125, 125)
     ax.set_ylim(-0.01, peak * 1.25)
     ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
-    ax.set_xticks([-100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100])
+    ax.set_xticks([-120, -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100, 120])
 
     plt.tight_layout()
     plt.savefig('field_band_distribution.pdf', dpi=300)                   
