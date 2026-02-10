@@ -96,7 +96,7 @@ def main():
     ax.plot(
         x_curve * 100, y_curve,
         color='black', linewidth=1.8, linestyle='-',
-        label='Half-cosine profile',
+        label='Sinusoid profile',
         zorder=3
     )
 
@@ -131,9 +131,9 @@ def main():
             fontweight='bold'
         )
 
-    ax.set_xlabel('Distance from centre (%)')
-    ax.set_ylabel('Field amplitude')
-    ax.set_title('Sinusoidal predefined field distribution')
+    ax.set_xlabel('Distance from Centre (%)')
+    ax.set_ylabel('Field Amplitude')
+    ax.set_title('Sinusoidal Predefined Field Distribution')
     ax.set_xlim(-105, 105)
     ax.set_ylim(-0.01, peak * 1.25)
     ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
@@ -142,7 +142,7 @@ def main():
     plt.tight_layout()
     plt.savefig('field_band_distribution.pdf', dpi=300)                   
     print("Saved to field_band_distribution.pdf") 
-    plt.savefig(r'C:\Users\cmb247\repos\Paper-PhD-FE\figures\field_band_distribution.pdf', dpi=300)
+    plt.savefig(r'C:\Users\cmb247\repos\Paper-DCM\figures\field_band_distribution.pdf', dpi=300)
     plt.close()
 
 
