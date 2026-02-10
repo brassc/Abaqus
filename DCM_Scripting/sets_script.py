@@ -29,10 +29,11 @@ WHAT THIS SCRIPT DOES
 
 4. CALCULATE SINUSOIDAL FIELD VALUES
    - Band 1 (center): 0.150 - peak field value
-   - Band 2: 0.128
-   - Band 3: 0.075
-   - Band 4: 0.022
-   - Band 5 (edge): 0.000 - minimum field value
+   - Band 2: 0.136
+   - Band 3: 0.098
+   - Band 4: 0.052
+   - Band 5 (edge): 0.014
+   - Cosine reaches 0.000 at 120% (virtual point, no node set created)
    - Uses raised cosine profile (zero gradient at center and edges)
 
 5. CREATE NODE SETS IN ABAQUS
@@ -201,28 +202,28 @@ def get_band_index(distance, d_upper, d_lower, num_bands=5):
 
 def calculate_field_values(num_bands=5, peak_value=0.15, min_value=0.0):
     """
-    Calculate sinusoidal field values for each band.
+    Calculate raised cosine field values for each band.
 
-    Uses half-cosine profile scaled between peak_value (center) and min_value (edge).
+    Uses raised cosine profile (smooth step) that reaches zero at 120% of the
+    region extent. Only num_bands values are returned (the virtual point at 120%
+    where the field reaches zero is not included).
 
     Parameters:
-        num_bands: number of bands
-        peak_value: field value at center (band 0)
-        min_value: field value at edge (band num_bands-1)
+        num_bands: number of bands to create
+        peak_value: field value at center (band 1)
+        min_value: field value at the virtual zero-crossing beyond the last band
 
     Returns:
         list: field values for each band
     """
     field_values = []
     amplitude = (peak_value - min_value)
+    num_points = num_bands + 1  # cosine reaches 0 at the virtual (num_bands+1)th point
 
     for i in range(num_bands):
-        # Position as fraction from center (0) to edge (1)
-        # Band 1 = 0.0, Band 2 = 0.25, ..., Band 5 = 1.0
-        if num_bands == 1:
-            band_position = 0.0
-        else:
-            band_position = i / (num_bands - 1.0)
+        # Position as fraction from center (0) to virtual zero-crossing (1)
+        # 6 points: 0, 0.2, 0.4, 0.6, 0.8, 1.0 - only first 5 returned
+        band_position = i / (num_points - 1.0)
 
         # Raised cosine: gradient = 0 at both center and edge (smooth step)
         field_value = amplitude * (1 + math.cos(math.pi * band_position)) / 2.0 + min_value
@@ -237,7 +238,7 @@ def create_sinusoidal_node_sets(
     lower_point,
     num_bands=5,
     peak_field_value=0.15,
-    min_field_value=0.01,
+    min_field_value=0.0,
     model_name='Model-1',
     instance_name='PART-1_1-1',
     set_prefix='FIELD_BAND',
