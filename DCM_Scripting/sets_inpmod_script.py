@@ -249,6 +249,12 @@ def write_sets_to_inp(inp_file, instance_name, band_nodes, field_values,
             temp_blocks.append("*Temperature, amplitude={}".format(amplitude_name))
             temp_blocks.append("{}, {}".format(set_name, field_values[i]))
 
+    # Check for duplicates
+    first_set = "{}_{:d}".format(set_prefix, 1)
+    if first_set in content:
+        print("WARNING: '{}' already exists in .inp file. Skipping to avoid duplicates.".format(first_set))
+        return
+
     # Find insertion points and build new content
     new_lines = []
     nsets_inserted = False
@@ -282,12 +288,11 @@ def write_sets_to_inp(inp_file, instance_name, band_nodes, field_values,
         f.write('\n'.join(new_lines))
 
     print("Written to {}".format(inp_file))
+    num_written = len([b for b in band_nodes if len(b) > 0])
     if nsets_inserted:
-        print("  - {} node set(s) inserted before *End Assembly".format(
-            sum(1 for b in band_nodes if len(b) > 0)))
+        print("  - {} node set(s) inserted before *End Assembly".format(num_written))
     if temps_inserted:
-        print("  - {} predefined field(s) inserted after ** PREDEFINED FIELDS".format(
-            sum(1 for b in band_nodes if len(b) > 0)))
+        print("  - {} predefined field(s) inserted after ** PREDEFINED FIELDS".format(num_written))
 
 
 def create_sinusoidal_node_sets(
