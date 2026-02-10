@@ -43,6 +43,9 @@ abaqus python odb_extract.py C:\Users\cmb247\ABAQUS\K_DC_FALX\k-nofalx-001\helme
 
 ## Architecture
 
+### DCM_Scripting/
+Spinal cord compression site modelling - see [DCM_Scripting/README.md](DCM_Scripting/README.md)
+
 ### Scripting/
 - **main.py** - Orchestrator for sphere-based node set creation
 - **node_set_export.py** - Export assembly node sets to CSV (`create_file_from_node_set`)
