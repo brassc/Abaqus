@@ -4,11 +4,12 @@ Scripts for applying spatially-varying predefined fields to spinal cord FE model
 
 ## Scripts
 
-- **sets_script.py** - Creates node sets and predefined temperature fields along a compression axis (Abaqus Python 2.7)
+- **sets_script.py** - Creates node sets and predefined temperature fields along a compression axis via the Abaqus CAE API (Abaqus Python 2.7)
+- **sets_inpmod_script.py** - Alternative that writes node sets and predefined fields directly into the `.inp` file (Abaqus Python 2.7). Use this when the CAE API corrupts the assembly tree (see below).
 - **field_band_plot.py** - Visualises the raised cosine field distribution (Python 3, matplotlib)
 - **coordinates.csv** - Compression site coordinates (center, upper, lower points per site)
 
-## Usage
+## Usage: sets_script.py (CAE API)
 
 Run in Abaqus CAE kernel:
 
@@ -28,6 +29,38 @@ execfile('sets_script.py')
 COORDS_FILE = 'coordinates.csv'
 execfile('sets_script.py')
 ```
+
+## Usage: sets_inpmod_script.py (direct .inp modification)
+
+This script exists because creating assembly-level sets via the Abaqus Python API (`assembly.Set`) can corrupt the assembly tree into sub-assemblies, causing the `.inp` writer to silently drop the sets and predefined fields. This script bypasses the CAE entirely by inserting `*Nset` and `*Temperature` keywords directly into an existing `.inp` file.
+
+**Prerequisites:** You must have already written a `.inp` file from your model (e.g. via Job Manager or `mdb.jobs['Job-1'].writeInput()`). The script reads node coordinates from the CAE model but writes all output to the `.inp` file.
+
+Run in Abaqus CAE kernel:
+
+```python
+os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+
+MODEL_NAME = 'Model-1'
+INSTANCE_NAME = 'PART-1_1-1'
+INP_FILE = 'Job-212.inp'
+
+# Option 1 - Single site
+CENTER_POINT = (x, y, z)
+UPPER_POINT = (x, y, z)
+LOWER_POINT = (x, y, z)
+execfile('sets_inpmod_script.py')
+
+# Option 2 - Multiple sites from CSV (takes priority if set)
+COORDS_FILE = 'coordinates.csv'
+execfile('sets_inpmod_script.py')
+```
+
+The script inserts:
+- `*Nset` blocks before `*End Assembly`
+- `*Temperature` blocks after `** PREDEFINED FIELDS` in the step section
+
+It will skip writing if the sets already exist in the `.inp` file to avoid duplicates.
 
 CSV format:
 ```
