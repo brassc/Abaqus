@@ -34,7 +34,7 @@ execfile('sets_script.py')
 
 This script exists because creating assembly-level sets via the Abaqus Python API (`assembly.Set`) can corrupt the assembly tree into sub-assemblies, causing the `.inp` writer to silently drop the sets and predefined fields. This script bypasses the CAE entirely by inserting `*Nset` and `*Temperature` keywords directly into an existing `.inp` file.
 
-**Prerequisites:** You must have already written a `.inp` file from your model (e.g. via Job Manager or `mdb.jobs['Job-1'].writeInput()`). The script reads node coordinates from the CAE model but writes all output to the `.inp` file.
+**Prerequisites:** You must have already written a `.inp` file from your model (e.g. via Job Manager or `mdb.jobs['Job-1'].writeInput()`). The script reads node coordinates from the CAE model but writes all output to a new `.inp` file (e.g. `Job-212.inp` -> `Job-212_modified.inp`). The original file is not modified.
 
 Run in Abaqus CAE kernel:
 
@@ -44,6 +44,7 @@ os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
 MODEL_NAME = 'Model-1'
 INSTANCE_NAME = 'PART-1_1-1'
 INP_FILE = 'Job-212.inp'
+PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15
 
 # Option 1 - Single site
 CENTER_POINT = (x, y, z)
