@@ -20,6 +20,7 @@ Option 1 - Single site:
     MODEL_NAME = 'Model-1'
     INSTANCE_NAME = 'PART-1_1-1'
     INP_FILE = 'Job-212.inp'
+    PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15
     CENTER_POINT = (x, y, z)
     UPPER_POINT = (x, y, z)
     LOWER_POINT = (x, y, z)
@@ -29,6 +30,7 @@ Option 2 - Multiple sites from CSV:
     MODEL_NAME = 'Model-1'
     INSTANCE_NAME = 'PART-1_1-1'
     INP_FILE = 'Job-212.inp'
+    PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15
     COORDS_FILE = 'coordinates.csv'
     execfile('sets_inpmod_script.py')
 
@@ -42,6 +44,7 @@ Python 2.7 compatible (Abaqus Python)
 from abaqus import *
 from abaqusConstants import *
 import math
+import os
 
 
 def read_coordinates_file(filepath):
@@ -206,16 +209,36 @@ def format_node_labels(node_labels, per_line=16):
     return '\n'.join(lines)
 
 
-def write_sets_to_inp(inp_file, instance_name, band_nodes, field_values,
-                      set_prefix, site_index, amplitude_name, num_bands):
+def generate_output_filename(inp_file):
     """
-    Write node sets and predefined temperature fields directly into an .inp file.
+    Generate output filename from input filename.
 
-    Inserts *Nset blocks before *End Assembly, and *Temperature blocks
-    after ** PREDEFINED FIELDS in the step section.
+    Example: 'Job-212.inp' -> 'Job-212_modified.inp'
 
     Parameters:
-        inp_file: path to the .inp file
+        inp_file: path to the input .inp file
+
+    Returns:
+        str: path to the output .inp file
+    """
+    base, ext = os.path.splitext(inp_file)
+    return "{}_modified{}".format(base, ext)
+
+
+def write_sets_to_inp(inp_file, out_file, instance_name, band_nodes, field_values,
+                      set_prefix, site_index, amplitude_name, num_bands):
+    """
+    Write node sets and predefined temperature fields into a new .inp file.
+
+    Reads from inp_file and writes the modified content to out_file.
+    Inserts *Nset blocks before *End Assembly. For *Temperature blocks:
+    - If ** PREDEFINED FIELDS exists, inserts after it
+    - If not, creates a new ** PREDEFINED FIELDS section in Step-1
+      (before the first section header, e.g. ** BOUNDARY CONDITIONS)
+
+    Parameters:
+        inp_file: path to the input .inp file (read only)
+        out_file: path to the output .inp file (written)
         instance_name: name of the part instance
         band_nodes: list of lists of node labels per band
         field_values: list of field values per band
@@ -255,24 +278,52 @@ def write_sets_to_inp(inp_file, instance_name, band_nodes, field_values,
         print("WARNING: '{}' already exists in .inp file. Skipping to avoid duplicates.".format(first_set))
         return
 
+    # Determine insertion strategy for temperature blocks
+    has_predef_fields = any(l.strip() == '** PREDEFINED FIELDS' for l in lines)
+
     # Find insertion points and build new content
     new_lines = []
     nsets_inserted = False
     temps_inserted = False
+    in_step_1 = False
 
     for line in lines:
+        stripped = line.strip()
+
         # Insert *Nset blocks before *End Assembly
-        if not nsets_inserted and line.strip() == '*End Assembly':
+        if not nsets_inserted and stripped == '*End Assembly':
             for block_line in nset_blocks:
                 new_lines.append(block_line)
             nsets_inserted = True
 
+        # If no ** PREDEFINED FIELDS exists, insert a new section
+        # before the first section header in Step-1
+        if not temps_inserted and not has_predef_fields:
+            if stripped.startswith('*Step,') and 'name=Step-1' in stripped:
+                in_step_1 = True
+            elif in_step_1 and stripped.startswith('** ') and len(stripped) > 3:
+                # Check if this is a section header (all-uppercase text after "** ")
+                header_text = stripped[3:]
+                if header_text == header_text.upper() and header_text[0].isalpha():
+                    new_lines.append('** ')
+                    new_lines.append('** PREDEFINED FIELDS')
+                    for block_line in temp_blocks:
+                        new_lines.append(block_line)
+                    temps_inserted = True
+                    print("  - Created new ** PREDEFINED FIELDS section in Step-1")
+            elif in_step_1 and stripped == '*End Step':
+                # Fallback: no section headers found, insert before *End Step
+                new_lines.append('** ')
+                new_lines.append('** PREDEFINED FIELDS')
+                for block_line in temp_blocks:
+                    new_lines.append(block_line)
+                temps_inserted = True
+                print("  - Created new ** PREDEFINED FIELDS section before *End Step")
+
         new_lines.append(line)
 
-        # Insert *Temperature blocks after ** PREDEFINED FIELDS
-        if not temps_inserted and line.strip() == '** PREDEFINED FIELDS':
-            # Skip the blank line after ** PREDEFINED FIELDS
-            # (it will be added by the next iteration)
+        # If ** PREDEFINED FIELDS exists, insert temperature blocks after it
+        if not temps_inserted and has_predef_fields and stripped == '** PREDEFINED FIELDS':
             for block_line in temp_blocks:
                 new_lines.append(block_line)
             temps_inserted = True
@@ -281,13 +332,13 @@ def write_sets_to_inp(inp_file, instance_name, band_nodes, field_values,
         print("WARNING: Could not find '*End Assembly' in .inp file")
         print("Node sets were NOT written")
     if not temps_inserted:
-        print("WARNING: Could not find '** PREDEFINED FIELDS' in .inp file")
+        print("WARNING: Could not find Step-1 in .inp file")
         print("Predefined fields were NOT written")
 
-    with open(inp_file, 'w') as f:
+    with open(out_file, 'w') as f:
         f.write('\n'.join(new_lines))
 
-    print("Written to {}".format(inp_file))
+    print("Written to {}".format(out_file))
     num_written = len([b for b in band_nodes if len(b) > 0])
     if nsets_inserted:
         print("  - {} node set(s) inserted before *End Assembly".format(num_written))
@@ -300,6 +351,7 @@ def create_sinusoidal_node_sets(
     upper_point,
     lower_point,
     inp_file,
+    out_file,
     num_bands=5,
     peak_field_value=0.15,
     min_field_value=0.0,
@@ -313,14 +365,16 @@ def create_sinusoidal_node_sets(
     Classify nodes into bands and write sets/predefined fields to .inp file.
 
     Reads node coordinates from the Abaqus model to classify nodes, then
-    writes *Nset and *Temperature keywords directly into the .inp file.
+    writes *Nset and *Temperature keywords into a new output .inp file.
+    The original input file is not modified.
     Does NOT create any CAE objects (no assembly.Set or modelDB.Temperature).
 
     Parameters:
         center_point: (x, y, z) center of the region (peak field value)
         upper_point: (x, y, z) upper limit of the region
         lower_point: (x, y, z) lower limit of the region
-        inp_file: path to the .inp file to modify
+        inp_file: path to the input .inp file (read only)
+        out_file: path to the output .inp file (written)
         num_bands: number of bands to create (default 5)
         peak_field_value: field value at center (default 0.15)
         min_field_value: field value at edges (default 0.0)
@@ -389,10 +443,12 @@ def create_sinusoidal_node_sets(
     # Calculate field values for each band
     field_values = calculate_field_values(num_bands, peak_field_value, min_field_value)
 
-    # Write to .inp file
-    print("Writing to .inp file: {}".format(inp_file))
+    # Write to output .inp file
+    print("Reading from: {}".format(inp_file))
+    print("Writing to: {}".format(out_file))
     write_sets_to_inp(
         inp_file=inp_file,
+        out_file=out_file,
         instance_name=instance_name,
         band_nodes=band_nodes,
         field_values=field_values,
@@ -436,6 +492,7 @@ if 'MODEL_NAME' not in dir():
     print("    MODEL_NAME = 'Model-1'")
     print("    INSTANCE_NAME = 'PART-1_1-1'")
     print("    INP_FILE = 'Job-212.inp'")
+    print("    PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15")
     print("    CENTER_POINT = (0.0, 0.0, 0.0)")
     print("    UPPER_POINT = (0.0, 0.0, 10.0)")
     print("    LOWER_POINT = (0.0, 0.0, -10.0)")
@@ -445,6 +502,7 @@ if 'MODEL_NAME' not in dir():
     print("    MODEL_NAME = 'Model-1'")
     print("    INSTANCE_NAME = 'PART-1_1-1'")
     print("    INP_FILE = 'Job-212.inp'")
+    print("    PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15")
     print("    COORDS_FILE = 'coordinates.csv'")
     print("    execfile('sets_inpmod_script.py')")
     print("")
@@ -457,9 +515,14 @@ elif 'INP_FILE' not in dir():
 
 elif 'COORDS_FILE' in dir():
     # --- Multiple sites from CSV file ---
+    if 'PEAK_FIELD_VALUE' not in dir():
+        PEAK_FIELD_VALUE = 0.15
+    OUT_FILE = generate_output_filename(INP_FILE)
     print("Model: " + MODEL_NAME)
     print("Instance: " + INSTANCE_NAME)
-    print("INP file: " + INP_FILE)
+    print("Input INP file: " + INP_FILE)
+    print("Output INP file: " + OUT_FILE)
+    print("Peak field value: {}".format(PEAK_FIELD_VALUE))
     print("Coordinates file: " + COORDS_FILE)
 
     sites = read_coordinates_file(COORDS_FILE)
@@ -476,11 +539,17 @@ elif 'COORDS_FILE' in dir():
 
         set_prefix = "{}_BAND".format(site['name'].upper().replace(' ', '_'))
 
+        # First site reads from the original; subsequent sites read
+        # from the output file which already contains previous sites
+        read_from = INP_FILE if idx == 0 else OUT_FILE
+
         create_sinusoidal_node_sets(
             center_point=site['center'],
             upper_point=site['upper'],
             lower_point=site['lower'],
-            inp_file=INP_FILE,
+            inp_file=read_from,
+            out_file=OUT_FILE,
+            peak_field_value=PEAK_FIELD_VALUE,
             model_name=MODEL_NAME,
             instance_name=INSTANCE_NAME,
             set_prefix=set_prefix,
@@ -488,12 +557,18 @@ elif 'COORDS_FILE' in dir():
         )
 
     print("\nAll {} sites processed.".format(len(sites)))
+    print("Output: {}".format(OUT_FILE))
 
 else:
     # --- Single site from variables ---
+    if 'PEAK_FIELD_VALUE' not in dir():
+        PEAK_FIELD_VALUE = 0.15
+    OUT_FILE = generate_output_filename(INP_FILE)
     print("Model: " + MODEL_NAME)
     print("Instance: " + INSTANCE_NAME)
-    print("INP file: " + INP_FILE)
+    print("Input INP file: " + INP_FILE)
+    print("Output INP file: " + OUT_FILE)
+    print("Peak field value: {}".format(PEAK_FIELD_VALUE))
     print("Center: {}".format(CENTER_POINT))
     print("Upper: {}".format(UPPER_POINT))
     print("Lower: {}".format(LOWER_POINT))
@@ -503,10 +578,12 @@ else:
         upper_point=UPPER_POINT,
         lower_point=LOWER_POINT,
         inp_file=INP_FILE,
+        out_file=OUT_FILE,
+        peak_field_value=PEAK_FIELD_VALUE,
         model_name=MODEL_NAME,
         instance_name=INSTANCE_NAME,
         set_prefix='FIELD_BAND',
         site_index=1
     )
 
-    print("Done")
+    print("Done. Output: {}".format(OUT_FILE))
