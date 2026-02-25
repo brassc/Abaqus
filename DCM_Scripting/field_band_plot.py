@@ -10,8 +10,8 @@ import math
 
 def set_publication_style():
     plt.rcParams.update({
-        'font.family': 'serif',
-        'font.serif': ['Times New Roman'],
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Arial'],
         'font.size': 11,
         'axes.labelsize': 13,
         'axes.titlesize': 14,
@@ -38,7 +38,7 @@ def main():
     set_publication_style()
 
     num_bands = 5
-    peak = 0.15
+    peak = 0.5
     min_val = 0.0
 
     band_positions, band_values = calculate_field_values(num_bands, peak, min_val)
