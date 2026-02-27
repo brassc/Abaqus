@@ -854,7 +854,7 @@ elif 'COORDS_FILE' in dir():
     print("Found {} sites in CSV file".format(len(sites)))
 
     OUT_FILE, SUMMARY_FILE = generate_overlap_filenames(
-        INP_FILE, REFERENCE_PRELOAD, [s['name'] for s in sites])
+        INP_FILE, PEAK_FIELD_VALUE, [s['name'] for s in sites])
     print("Output INP file: " + OUT_FILE)
     print("Summary file:    " + SUMMARY_FILE)
 
