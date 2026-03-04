@@ -843,11 +843,11 @@ elif 'INP_FILE' not in dir():
 elif 'COORDS_FILE' in dir():
     # --- Multiple sites from CSV file (three-pass: classify, resolve, write) ---
     if 'PEAK_FIELD_VALUE' not in dir():
-        PEAK_FIELD_VALUE = 0.15
+        PEAK_FIELD_VALUE = REFERENCE_PRELOAD
     print("Model: " + MODEL_NAME)
     print("Instance: " + INSTANCE_NAME)
     print("Input INP file: " + INP_FILE)
-    print("Fallback peak field value: {}".format(PEAK_FIELD_VALUE))
+    print("Peak field value: {}".format(PEAK_FIELD_VALUE))
     print("Coordinates file: " + COORDS_FILE)
 
     sites = read_coordinates_file(COORDS_FILE)
@@ -899,7 +899,7 @@ elif 'COORDS_FILE' in dir():
                 site_peak_value = compute_scaled_peak_value(
                     upper_cord_sag_dist=site['upper_cord_sag_dist'],
                     indent_cord_sag_dist=site['indent_cord_sag_dist'],
-                    reference_preload=REFERENCE_PRELOAD,
+                    reference_preload=PEAK_FIELD_VALUE,
                     ref_upper_cord_sag_dist=REF_UPPER_CORD_SAG_DIST,
                     ref_indent_cord_sag_dist=REF_INDENT_CORD_SAG_DIST
                 )
