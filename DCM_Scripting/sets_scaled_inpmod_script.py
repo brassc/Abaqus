@@ -543,7 +543,7 @@ print("sets_scaled_inpmod_script.py loaded")
 # --- Reference calibration constants ---
 # Override any of these before execfile() if your reference site differs.
 if 'REFERENCE_PRELOAD' not in dir():
-    REFERENCE_PRELOAD = 0.5
+    REFERENCE_PRELOAD = 0.3
 if 'REF_UPPER_CORD_SAG_DIST' not in dir():
     REF_UPPER_CORD_SAG_DIST = 6.82259
 if 'REF_INDENT_CORD_SAG_DIST' not in dir():

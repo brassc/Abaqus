@@ -101,19 +101,21 @@ compression_fraction_site = (upper_cord_sag_dist - indent_cord_sag_dist) / upper
 
 compression_fraction_ref  = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_UPPER_CORD_SAG_DIST
 
-peak_field_value = REFERENCE_PRELOAD × (compression_fraction_site / compression_fraction_ref)
+peak_field_value = PEAK_FIELD_VALUE × (compression_fraction_site / compression_fraction_ref)
 ```
 
-Default reference calibration constants (the site at which preload was manually validated):
+`PEAK_FIELD_VALUE` is the desired preload at the reference site geometry — set this before `execfile()` to run different preload levels (e.g. 0.3, 0.4, 0.5). All other sites scale proportionally from it. It defaults to `REFERENCE_PRELOAD` (0.5) if not set.
+
+Reference calibration constants (fixed — define the geometry at which preload was manually validated):
 
 | Constant | Value | Description |
 |---|---|---|
-| `REFERENCE_PRELOAD` | 0.5 | Preload validated at the reference site |
+| `REFERENCE_PRELOAD` | 0.3 | Default value of `PEAK_FIELD_VALUE` if not set; preload validated at the reference site |
 | `REF_UPPER_CORD_SAG_DIST` | 6.82259 mm | Healthy cord AP diameter at reference site |
 | `REF_INDENT_CORD_SAG_DIST` | 4.24591 mm | Compressed cord AP diameter at reference site |
 | `compression_fraction_ref` | 0.3778 | (6.82259 − 4.24591) / 6.82259 |
 
-These can be overridden before `execfile()` if the reference site changes.
+The calibration constants only need overriding if the reference site itself changes.
 
 ### Usage
 
@@ -134,13 +136,9 @@ LOWER_POINT  = (x, y, z)
 execfile('sets_scaled_inpmod_script.py')
 
 # Option 2 - Multiple sites from CSV (scaling applied automatically per site)
+PEAK_FIELD_VALUE = 0.3    # desired preload at reference site; all others scale from this (default)
 COORDS_FILE = 'coordinates.csv'
 execfile('sets_scaled_inpmod_script.py')
-
-# Optionally override reference calibration before execfile()
-REFERENCE_PRELOAD        = 0.5
-REF_UPPER_CORD_SAG_DIST  = 6.82259
-REF_INDENT_CORD_SAG_DIST = 4.24591
 ```
 
 CSV format:
@@ -149,7 +147,7 @@ site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,low
 Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
 ```
 
-The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, the script falls back to `PEAK_FIELD_VALUE` (default 0.15).
+The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.5) if not set.
 
 ---
 
@@ -196,7 +194,7 @@ Two files are written to the same directory as the input `.inp` file:
 
 - **Modified `.inp` file** — name is derived from the input filename with the following transformations:
   - `TEMPLATE` (case-insensitive) is stripped along with its adjacent separator characters
-  - The reference preload is appended as e.g. `0pt50` (decimal point replaced with `pt`)
+  - `PEAK_FIELD_VALUE` is appended as e.g. `0pt50` (decimal point replaced with `pt`)
   - Site names from the CSV (in order) are appended, separated by `_`
   - Example: `Job-N01-015-TEMPLATE_2STEP.inp` → `Job-N01-015_2STEP_0pt50_Site1_Site2.inp`
 
@@ -224,13 +222,9 @@ LOWER_POINT  = (x, y, z)
 execfile('sets_scaled_inpmod_overlap.py')
 
 # Option 2 - Multiple sites from CSV (scaling + overlap detection applied automatically)
+PEAK_FIELD_VALUE = 0.3    # desired preload at reference site; all others scale from this (default)
 COORDS_FILE = 'coordinates_scaled.csv'
 execfile('sets_scaled_inpmod_overlap.py')
-
-# Optionally override reference calibration before execfile()
-REFERENCE_PRELOAD        = 0.5
-REF_UPPER_CORD_SAG_DIST  = 6.82259
-REF_INDENT_CORD_SAG_DIST = 4.24591
 ```
 
 CSV format (`coordinates_scaled.csv`):
@@ -240,7 +234,7 @@ Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
 Site2,0.0,10.0,0.0,0.0,10.0,10.0,0.0,10.0,-10.0,7.10,5.50
 ```
 
-The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, the script falls back to `PEAK_FIELD_VALUE` (default 0.15) and no preload scaling is applied for that site.
+The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling for that site. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.5) if not set.
 
 ---
 
@@ -256,15 +250,15 @@ where `x = band_index / num_bands`. For 5 bands this gives 6 evenly spaced point
 
 The raised cosine has zero gradient at centre point of indentation and at the edge ($x$ intercept) at 120% of the distance. This gives a smooth step akin to the Abaqus smooth step amplitude definition.
 
-With `peak = 0.15`, `min = 0.0`:
+With `PEAK_FIELD_VALUE = 0.3` (default), `min = 0.0`:
 
 | Band | Distance from centre | Field value |
 |------|---------------------|-------------|
-| 1    | 0%                  | 0.150       |
-| 2    | 24%                 | 0.136       |
-| 3    | 48%                 | 0.098       |
-| 4    | 72%                 | 0.052       |
-| 5    | 96%                 | 0.014       |
+| 1    | 0%                  | 0.300       |
+| 2    | 24%                 | 0.271       |
+| 3    | 48%                 | 0.196       |
+| 4    | 72%                 | 0.104       |
+| 5    | 96%                 | 0.029       |
 | (virtual) | 120%           | 0.000       |
 
 ## Output
