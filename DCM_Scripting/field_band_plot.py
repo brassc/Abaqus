@@ -38,7 +38,7 @@ def main():
     set_publication_style()
 
     num_bands = 5
-    peak = 0.5
+    peak = 0.3
     min_val = 0.0
 
     band_positions, band_values = calculate_field_values(num_bands, peak, min_val)

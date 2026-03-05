@@ -81,30 +81,32 @@ This script extends `sets_inpmod_script.py` with automatic per-site preload scal
 The predefined temperature field represents swelling of the cord back towards its pre-compression size. Because the field drives thermal **strain** (fractional deformation) rather than displacement directly, the displacement produced is:
 
 ```
-displacement = strain × cord diameter
+displacement = strain × current_cord_diameter
 ```
 
-To produce a target displacement equal to the compression at a given site, the required strain is therefore:
+where `current_cord_diameter` is the cord's **compressed** diameter (`indent_cord_sag_dist`) — the size the cord elements are at when the preload is applied. To close the full compression gap, the required thermal strain is therefore:
 
 ```
-required strain = (upper_cord_sag_dist - indent_cord_sag_dist) / upper_cord_sag_dist
+required strain = (upper_cord_sag_dist - indent_cord_sag_dist) / indent_cord_sag_dist
 ```
 
 where:
-- `upper_cord_sag_dist` — sagittal (AP) cord diameter measured at the unaffected level at the upper inflection point (mm)
-- `indent_cord_sag_dist` — sagittal (AP) cord diameter measured at the indent/compression site (mm)
+- `upper_cord_sag_dist` — sagittal (AP) cord diameter at the unaffected level (mm)
+- `indent_cord_sag_dist` — sagittal (AP) cord diameter at the indent/compression site (mm)
+
+This is the **compression ratio** (gap relative to compressed size), not the compression fraction (gap relative to uncompressed size). Using the uncompressed diameter as denominator systematically underestimates the required preload, with the error growing with compression severity.
 
 The peak field value (preload) is scaled proportionally to this required strain, normalised to a known reference calibration point:
 
 ```
-compression_fraction_site = (upper_cord_sag_dist - indent_cord_sag_dist) / upper_cord_sag_dist
+compression_ratio_site = (upper_cord_sag_dist - indent_cord_sag_dist) / indent_cord_sag_dist
 
-compression_fraction_ref  = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_UPPER_CORD_SAG_DIST
+compression_ratio_ref  = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_INDENT_CORD_SAG_DIST
 
-peak_field_value = PEAK_FIELD_VALUE × (compression_fraction_site / compression_fraction_ref)
+peak_field_value = PEAK_FIELD_VALUE × (compression_ratio_site / compression_ratio_ref)
 ```
 
-`PEAK_FIELD_VALUE` is the desired preload at the reference site geometry — set this before `execfile()` to run different preload levels (e.g. 0.3, 0.4, 0.5). All other sites scale proportionally from it. It defaults to `REFERENCE_PRELOAD` (0.5) if not set.
+`PEAK_FIELD_VALUE` is the desired preload at the reference site geometry — set this before `execfile()` to run different preload levels (e.g. 0.3, 0.4, 0.5). All other sites scale proportionally from it. It defaults to `REFERENCE_PRELOAD` (0.3) if not set.
 
 Reference calibration constants (fixed — define the geometry at which preload was manually validated):
 
@@ -113,7 +115,7 @@ Reference calibration constants (fixed — define the geometry at which preload 
 | `REFERENCE_PRELOAD` | 0.3 | Default value of `PEAK_FIELD_VALUE` if not set; preload validated at the reference site |
 | `REF_UPPER_CORD_SAG_DIST` | 6.82259 mm | Healthy cord AP diameter at reference site |
 | `REF_INDENT_CORD_SAG_DIST` | 4.24591 mm | Compressed cord AP diameter at reference site |
-| `compression_fraction_ref` | 0.3778 | (6.82259 − 4.24591) / 6.82259 |
+| `compression_ratio_ref` | 0.6068 | (6.82259 − 4.24591) / 4.24591 |
 
 The calibration constants only need overriding if the reference site itself changes.
 
@@ -147,7 +149,7 @@ site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,low
 Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
 ```
 
-The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.5) if not set.
+The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.3) if not set.
 
 ---
 
@@ -234,7 +236,7 @@ Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
 Site2,0.0,10.0,0.0,0.0,10.0,10.0,0.0,10.0,-10.0,7.10,5.50
 ```
 
-The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling for that site. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.5) if not set.
+The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling for that site. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.3) if not set.
 
 ---
 
