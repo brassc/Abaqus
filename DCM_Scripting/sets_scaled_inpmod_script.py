@@ -8,11 +8,11 @@ directly into the Abaqus .inp file.
 Extends sets_inpmod_script.py with automatic per-site preload scaling
 based on sagittal cord diameter measurements. The peak field value
 (preload) at each site is scaled relative to a known reference
-calibration point using the compression fraction:
+calibration point using the compression ratio:
 
-    compression_fraction     = (upper_cord_sag_dist - indent_cord_sag_dist) / upper_cord_sag_dist
-    ref_compression_fraction = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_UPPER_CORD_SAG_DIST
-    peak_field_value         = REFERENCE_PRELOAD * (compression_fraction / ref_compression_fraction)
+    compression_ratio     = (upper_cord_sag_dist - indent_cord_sag_dist) / indent_cord_sag_dist
+    ref_compression_ratio = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_INDENT_CORD_SAG_DIST
+    peak_field_value      = REFERENCE_PRELOAD * (compression_ratio / ref_compression_ratio)
 
     upper_cord_sag_dist  - sagittal cord AP diameter at unaffected level (mm)
     indent_cord_sag_dist - sagittal cord AP diameter at the compression/indent site (mm)
@@ -121,12 +121,19 @@ def compute_scaled_peak_value(upper_cord_sag_dist, indent_cord_sag_dist,
     """
     Compute scaled peak field value from sagittal cord diameter measurements.
 
-    Scales the preload proportionally to the compression fraction at this site
+    Scales the preload proportionally to the compression ratio at this site
     relative to the reference calibration site:
 
-        compression_fraction     = (upper - indent) / upper
-        ref_compression_fraction = (ref_upper - ref_indent) / ref_upper
-        peak_value               = reference_preload * (compression_fraction / ref_compression_fraction)
+        compression_ratio     = (upper - indent) / indent
+        ref_compression_ratio = (ref_upper - ref_indent) / ref_indent
+        peak_value            = reference_preload * (compression_ratio / ref_compression_ratio)
+
+    The denominator is the compressed diameter (indent), not the uncompressed
+    diameter (upper). Thermal strain acts on cord elements at their current
+    compressed size, so the required strain to close the gap (upper - indent)
+    is (upper - indent) / indent. Using upper as denominator systematically
+    underestimates the required preload, with the error growing with compression
+    severity.
 
     Parameters:
         upper_cord_sag_dist      - cord AP diameter at unaffected level (mm)
@@ -138,9 +145,9 @@ def compute_scaled_peak_value(upper_cord_sag_dist, indent_cord_sag_dist,
     Returns:
         float: scaled peak field value
     """
-    compression_fraction = (upper_cord_sag_dist - indent_cord_sag_dist) / upper_cord_sag_dist
-    ref_compression_fraction = (ref_upper_cord_sag_dist - ref_indent_cord_sag_dist) / ref_upper_cord_sag_dist
-    return reference_preload * (compression_fraction / ref_compression_fraction)
+    compression_ratio = (upper_cord_sag_dist - indent_cord_sag_dist) / indent_cord_sag_dist
+    ref_compression_ratio = (ref_upper_cord_sag_dist - ref_indent_cord_sag_dist) / ref_indent_cord_sag_dist
+    return reference_preload * (compression_ratio / ref_compression_ratio)
 
 
 def dot_product(v1, v2):
@@ -621,11 +628,11 @@ elif 'COORDS_FILE' in dir():
                 ref_upper_cord_sag_dist=REF_UPPER_CORD_SAG_DIST,
                 ref_indent_cord_sag_dist=REF_INDENT_CORD_SAG_DIST
             )
-            site_compression_fraction = (site['upper_cord_sag_dist'] - site['indent_cord_sag_dist']) / site['upper_cord_sag_dist']
-            print("Upper cord sag dist:       {:.5f} mm".format(site['upper_cord_sag_dist']))
-            print("Indent cord sag dist:      {:.5f} mm".format(site['indent_cord_sag_dist']))
-            print("Site compression fraction: {:.4f}".format(site_compression_fraction))
-            print("Scaled peak field value:   {:.4f}".format(site_peak_value))
+            site_compression_ratio = (site['upper_cord_sag_dist'] - site['indent_cord_sag_dist']) / site['indent_cord_sag_dist']
+            print("Upper cord sag dist:      {:.5f} mm".format(site['upper_cord_sag_dist']))
+            print("Indent cord sag dist:     {:.5f} mm".format(site['indent_cord_sag_dist']))
+            print("Site compression ratio:   {:.4f}".format(site_compression_ratio))
+            print("Scaled peak field value:  {:.4f}".format(site_peak_value))
         else:
             site_peak_value = PEAK_FIELD_VALUE
             print("No cord distances in CSV. Using fallback PEAK_FIELD_VALUE: {}".format(site_peak_value))
