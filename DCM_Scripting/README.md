@@ -4,15 +4,71 @@ Scripts for applying spatially-varying predefined fields to spinal cord FE model
 
 ## Scripts
 
-- **sets_script.py** - Creates node sets and predefined temperature fields along a compression axis via the Abaqus CAE API (Abaqus Python 2.7)
-- **sets_inpmod_script.py** - Alternative that writes node sets and predefined fields directly into the `.inp` file (Abaqus Python 2.7). Use this when the CAE API corrupts the assembly tree (see below).
-- **sets_scaled_inpmod_script.py** - Extends `sets_inpmod_script.py` with automatic per-site preload scaling based on sagittal cord diameter measurements. Use this when applying preloads across multiple indent sites or patients with varying cord sizes (Abaqus Python 2.7).
+- **sets_scaled_inpmod_gm_script.py** ⭐ **PRIMARY — USE THIS** ⭐ — Extends `sets_scaled_inpmod_script.py` with `CORD_SET_NAME` filtering for models where the cord shares a combined part instance with other anatomy. Requires a `Cord` assembly node set (GM + WM combined). All other features identical to `sets_scaled_inpmod_script.py` (Abaqus Python 2.7).
+- **sets_scaled_inpmod_script.py** - Extends `sets_inpmod_script.py` with automatic per-site preload scaling based on sagittal cord diameter measurements. Use only if the cord IS its own separate assembly instance (Abaqus Python 2.7).
 - **sets_scaled_inpmod_overlap.py** - Extends `sets_scaled_inpmod_script.py` with automatic detection and resolution of overlapping node assignments across multiple compression sites, plus a structured summary output file. Use this for multi-level DCM cases (Abaqus Python 2.7).
+- **sets_inpmod_script.py** - Writes node sets and predefined fields directly into the `.inp` file without preload scaling. Superceded by `sets_scaled_inpmod_script.py` (Abaqus Python 2.7).
+- **sets_script.py** - Original version using the Abaqus CAE API. **Not recommended** — creates assembly-level sets via the API which can corrupt the assembly tree (see below). Retained for reference only (Abaqus Python 2.7).
 - **field_band_plot.py** - Visualises the raised cosine field distribution (Python 3, matplotlib)
 - **coordinates.csv** - Compression site coordinates (center, upper, lower points per site) — basic format without cord diameters
 - **coordinates_scaled.csv** - Compression site coordinates with sagittal cord diameter measurements for preload scaling and overlap resolution
 
-## Usage: sets_script.py (CAE API)
+---
+
+## Usage: sets_scaled_inpmod_gm_script.py ⭐ PRIMARY
+
+Use this script when the spinal cord **shares a combined part instance** with other anatomy (bone, disc, ligaments) — i.e. the cord is NOT its own separate assembly instance.
+
+**Prerequisites:**
+1. Write a `.inp` from your model (Job Manager or `mdb.jobs['Job-1'].writeInput()`)
+2. In CAE, create an assembly node set called `Cord` combining your GM and WM sets (e.g. `PART-1-1.P44;GM` + `PART-1-1.P45;WM`)
+3. Check your `.inp` for the amplitude name (search `*Amplitude`) — the default assumed is `Amp-1-preload`. If your model uses a different name (e.g. `AMP-1`), the job will fail with `THERE IS NO AMPLITUDE BY THE NAME Amp-1-preload`. To fix: open the output `.inp` and search-replace `Amp-1-preload` with your actual amplitude name.
+
+Run in Abaqus CAE kernel:
+
+```python
+import os
+os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+```
+
+**Option 1 — Single site (manual peak value, no scaling):**
+```python
+MODEL_NAME       = 'Model-1'
+INSTANCE_NAME    = 'PART-1-1'
+INP_FILE         = 'Job-212.inp'
+PEAK_FIELD_VALUE = 0.3
+CORD_SET_NAME    = 'Cord'
+CENTER_POINT     = (x, y, z)
+UPPER_POINT      = (x, y, z)
+LOWER_POINT      = (x, y, z)
+execfile('sets_scaled_inpmod_gm_script.py')
+```
+
+**Option 2 — Multiple sites from CSV (auto-scaled):**
+```python
+MODEL_NAME    = 'Model-1'
+INSTANCE_NAME = 'PART-1-1'
+INP_FILE      = 'Job-212.inp'
+CORD_SET_NAME = 'Cord'
+COORDS_FILE   = 'coordinates_scaled.csv'
+execfile('sets_scaled_inpmod_gm_script.py')
+```
+
+If `CORD_SET_NAME` is not set, all nodes in `INSTANCE_NAME` are classified (same as `sets_scaled_inpmod_script.py`).
+
+**Point placement guidance:** upper, center, and lower points define the axis vector (`normalize(upper - lower)`). Place all three on the **same face and same mesh layer** of the cord surface. Mixing mesh layers on the same face introduces an artificial tilt into the axis vector, creating non-uniform temperature across the cord cross-section. Ensure `upper_cord_sag_dist` > `indent_cord_sag_dist` — swapping these produces negative field values.
+
+All other behaviour (preload scaling, CSV format, field profile, output files) is identical to `sets_scaled_inpmod_script.py` — see that section below for full details.
+
+---
+
+---
+
+## Other scripts (secondary / legacy)
+
+---
+
+## Usage: sets_script.py (CAE API — not recommended)
 
 Run in Abaqus CAE kernel:
 
@@ -33,7 +89,7 @@ COORDS_FILE = 'coordinates.csv'
 execfile('sets_script.py')
 ```
 
-## Usage: sets_inpmod_script.py (direct .inp modification)
+## Usage: sets_inpmod_script.py (direct .inp modification — superceded)
 
 This script exists because creating assembly-level sets via the Abaqus Python API (`assembly.Set`) can corrupt the assembly tree into sub-assemblies, causing the `.inp` writer to silently drop the sets and predefined fields. This script bypasses the CAE entirely by inserting `*Nset` and `*Temperature` keywords directly into an existing `.inp` file.
 
@@ -72,7 +128,7 @@ site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,low
 Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0
 ```
 
-## Usage: sets_scaled_inpmod_script.py (direct .inp modification with preload scaling)
+## Usage: sets_scaled_inpmod_script.py (direct .inp modification with preload scaling — use gm_script instead if cord shares an instance)
 
 This script extends `sets_inpmod_script.py` with automatic per-site preload scaling. It is intended for use across multiple indent sites or patients where cord geometry varies. All `.inp` file handling is identical to `sets_inpmod_script.py`; the only difference is how the peak field value (preload) is determined.
 
