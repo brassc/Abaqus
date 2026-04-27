@@ -1,21 +1,32 @@
 """
-Spinal Cord Node Set Creation Script - With Cord-Diameter-Based Preload Scaling
-and Cord Node Set Filtering
-================================================================================
+Spinal Cord Node Set Creation Script - With Cord-Diameter-Based Preload Scaling,
+Cord Node Set Filtering, and Overlap Detection and Resolution
+=================================================================================
 Creates node sets and predefined temperature fields for modelling
 compression sites in spinal cord injury simulations by writing
 directly into the Abaqus .inp file.
 
-Extends sets_scaled_inpmod_script.py with optional filtering of node
+Extends sets_scaled_inpmod_overlap.py with optional filtering of node
 classification to a named assembly node set (e.g. 'Cord'). Use this when
 the spinal cord is NOT its own separate assembly instance but shares a
 combined instance with other anatomy.
 
-Extends sets_inpmod_script.py with automatic per-site preload scaling
-based on sagittal cord diameter measurements. The peak field value
-(preload) at each site is scaled relative to a known reference
-calibration point using the compression ratio:
+Overlap resolution strategy (multi-site CSV path only):
+    When a node falls within the band regions of more than one site, it is
+    assigned exclusively to the site that gives it the MINIMUM field value
+    (based on each site's raised-cosine band profile). This is physically
+    conservative: transition zones between adjacent compression levels receive
+    the lower preload rather than being double-loaded.
 
+    A significant-overlap warning is printed for any site pair where contested
+    nodes fall in a high-field band (band index 0 or 1) of either site. This
+    indicates that the upper/lower extents in the CSV may be configured too
+    broadly.
+
+    Same-level anterior+posterior compressions should be defined as a SINGLE
+    site in the CSV - no special overlap handling is needed for that case.
+
+Also includes cord-diameter-based preload scaling:
     compression_ratio     = (upper_cord_sag_dist - indent_cord_sag_dist) / indent_cord_sag_dist
     ref_compression_ratio = (REF_UPPER_CORD_SAG_DIST - REF_INDENT_CORD_SAG_DIST) / REF_INDENT_CORD_SAG_DIST
     peak_field_value      = REFERENCE_PRELOAD * (compression_ratio / ref_compression_ratio)
@@ -45,12 +56,12 @@ Option 1 - Single site (manual PEAK_FIELD_VALUE, no scaling):
     LOWER_POINT = (x, y, z)
     execfile('sets_scaled_inpmod_gm_script.py')
 
-Option 2 - Multiple sites from CSV (scaling applied automatically):
+Option 2 - Multiple sites from CSV (overlap detection + scaling applied automatically):
     MODEL_NAME = 'Model-1'
     INSTANCE_NAME = 'PART-1-1'
     INP_FILE = 'Job-212.inp'
     CORD_SET_NAME = 'Cord'
-    COORDS_FILE = 'coordinates.csv'
+    COORDS_FILE = 'coordinates_scaled.csv'
     execfile('sets_scaled_inpmod_gm_script.py')
 
     Optionally override reference calibration before execfile:
@@ -63,12 +74,12 @@ CORD_SET_NAME notes:
     - If not set (or None), all nodes of INSTANCE_NAME are classified (original behaviour).
     - Create the 'Cord' set in CAE by combining your GM and WM sets before running.
 
-CSV format (coordinates.csv):
+CSV format (coordinates_scaled.csv):
     site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,lower_z,upper_cord_sag_dist,indent_cord_sag_dist
     Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
 
     Columns upper_cord_sag_dist and indent_cord_sag_dist are optional.
-    If absent, falls back to PEAK_FIELD_VALUE (default 0.15).
+    If absent, falls back to PEAK_FIELD_VALUE (default 0.3).
 
 Python 2.7 compatible (Abaqus Python)
 """
@@ -77,6 +88,7 @@ from abaqus import *
 from abaqusConstants import *
 import math
 import os
+import re
 
 
 def read_coordinates_file(filepath):
@@ -302,6 +314,54 @@ def generate_output_filename(inp_file):
     return "{}_modified{}".format(base, ext)
 
 
+def generate_overlap_filenames(inp_file, reference_preload, site_names):
+    """
+    Generate output .inp and summary .txt filenames for the multi-site overlap path.
+
+    Transformations applied to the input base name:
+      1. 'template' (case-insensitive) is removed along with adjacent separators (- or _).
+         Any resulting consecutive separators are collapsed to a single underscore.
+      2. Preload level is appended, formatted as e.g. '0pt50' (decimal point -> 'pt').
+      3. Site names (from CSV, in order) are appended, separated by '_'.
+
+    The summary .txt receives the same base name as the output .inp.
+
+    Example:
+      inp_file          = 'D:/path/Job-N01-015-TEMPLATE_2STEP.inp'
+      reference_preload = 0.5
+      site_names        = ['Site1', 'Site2']
+      -> out_inp     = 'D:/path/Job-N01-015_2STEP_0pt50_Site1_Site2.inp'
+      -> out_summary = 'D:/path/Job-N01-015_2STEP_0pt50_Site1_Site2_overlap_summary.txt'
+
+    Parameters:
+        inp_file:          path to the original .inp file
+        reference_preload: float, preload level to embed in filename
+        site_names:        list of site name strings in CSV order
+
+    Returns:
+        tuple: (out_inp_file, out_summary_file)
+    """
+    base, ext = os.path.splitext(inp_file)
+
+    # Remove 'template' along with any immediately adjacent separators (-, _)
+    base = re.sub(r'[-_]*template[-_]*', '_', base, flags=re.IGNORECASE)
+
+    # Collapse any resulting consecutive separators and strip trailing ones
+    base = re.sub(r'[-_]{2,}', '_', base)
+    base = base.rstrip('_-')
+
+    # Format preload: 0.5 -> '0pt50', 0.15 -> '0pt15'
+    preload_str = '{:.2f}'.format(reference_preload).replace('.', 'pt')
+
+    # Assemble new base: original_cleaned _ preload _ site1 _ site2 ...
+    new_base = '{}_{}_{}'.format(base, preload_str, '_'.join(site_names))
+
+    out_inp     = '{}{}'.format(new_base, ext)
+    out_summary = '{}_overlap_summary.txt'.format(new_base)
+
+    return out_inp, out_summary
+
+
 def write_sets_to_inp(inp_file, out_file, instance_name, band_nodes, field_values,
                       set_prefix, site_index, amplitude_name, num_bands):
     """
@@ -423,6 +483,211 @@ def write_sets_to_inp(inp_file, out_file, instance_name, band_nodes, field_value
         print("  - {} predefined field(s) inserted after ** PREDEFINED FIELDS".format(num_written))
 
 
+def classify_nodes_for_site(
+    center_point,
+    upper_point,
+    lower_point,
+    assembly,
+    instance_name,
+    num_bands=5,
+    cord_set_name=None
+):
+    """
+    Classify all nodes in an instance into bands for one compression site.
+
+    This is the pure classification kernel, decoupled from .inp file writing.
+    Called by the multi-site overlap-resolution path (Pass 1). The single-site
+    path uses create_sinusoidal_node_sets which contains equivalent logic inline.
+
+    Parameters:
+        center_point:  (x, y, z) center of the compression region
+        upper_point:   (x, y, z) upper limit of the region
+        lower_point:   (x, y, z) lower limit of the region
+        assembly:      Abaqus rootAssembly object (resolved once by caller)
+        instance_name: name of the part instance in the assembly
+        num_bands:     number of bands (default 5)
+        cord_set_name: name of an assembly node set to restrict classification to
+                       (e.g. 'Cord'). If None, all nodes of instance_name are used.
+
+    Returns:
+        list of num_bands lists of integer node labels, or None if instance
+        is not found.
+    """
+    axis_vector = (
+        upper_point[0] - lower_point[0],
+        upper_point[1] - lower_point[1],
+        upper_point[2] - lower_point[2]
+    )
+    axis_vector = normalize_vector(axis_vector)
+
+    d_upper = calculate_axis_projection(upper_point, axis_vector, center_point)
+    d_lower = calculate_axis_projection(lower_point, axis_vector, center_point)
+
+    print("  Axis vector: ({:.3f}, {:.3f}, {:.3f})".format(*axis_vector))
+    print("  Distance to upper limit: {:.3f}".format(d_upper))
+    print("  Distance to lower limit: {:.3f}".format(d_lower))
+
+    try:
+        instance = assembly.instances[instance_name]
+        all_nodes = instance.nodes
+        print("  Found {} nodes in instance '{}'".format(len(all_nodes), instance_name))
+    except KeyError:
+        print("Error: Instance '{}' not found in assembly.".format(instance_name))
+        print("Available instances: {}".format(list(assembly.instances.keys())))
+        return None
+
+    # Build allowed label set from named assembly node set (optional filter)
+    allowed_labels = None
+    if cord_set_name:
+        try:
+            allowed_labels = set(n.label for n in assembly.sets[cord_set_name].nodes)
+            print("  Filtering to {} nodes from cord set '{}'".format(len(allowed_labels), cord_set_name))
+        except KeyError:
+            print("  Warning: Assembly set '{}' not found. Classifying all instance nodes.".format(cord_set_name))
+
+    band_nodes = [[] for _ in range(num_bands)]
+    nodes_outside = 0
+
+    for node in all_nodes:
+        if allowed_labels is not None and node.label not in allowed_labels:
+            continue
+        coords = node.coordinates
+        distance = calculate_axis_projection(coords, axis_vector, center_point)
+        band_idx = get_band_index(distance, d_upper, d_lower, num_bands)
+        if band_idx >= 0:
+            band_nodes[band_idx].append(node.label)
+        else:
+            nodes_outside += 1
+
+    print("  Nodes classified: {}  outside: {}".format(
+        sum([len(b) for b in band_nodes]), nodes_outside))
+    return band_nodes
+
+
+def resolve_overlaps(all_site_band_nodes, all_site_field_values, site_names, num_bands=5):
+    """
+    Resolve multi-site node conflicts using minimum-field-value assignment.
+
+    For each node appearing in more than one site's band lists, keeps it only
+    in the site+band that gives it the lowest field value. Removes it from all
+    other competing sites' bands. Mutates all_site_band_nodes in-place.
+
+    Prints a warning for each site pair where contested nodes fall in a
+    high-field band (band index 0 or 1) of either site -- indicates that
+    the upper/lower extents in the CSV may be configured too broadly.
+
+    Parameters:
+        all_site_band_nodes   -- list[site_idx][band_idx] -> list of int node labels
+                                 (mutated in-place)
+        all_site_field_values -- list[site_idx][band_idx] -> float field value
+        site_names            -- list of site name strings (for warning messages)
+        num_bands             -- number of bands (default 5)
+
+    Returns:
+        overlap_stats -- list of dicts, one per overlapping site pair:
+            {'site_i', 'site_j', 'name_i', 'name_j',
+             'total_contested', 'high_field_contested',
+             'kept_by_i', 'kept_by_j'}
+    """
+    num_sites = len(all_site_band_nodes)
+
+    # Step 1: Build reverse index -- node_label -> list of (site_idx, band_idx)
+    node_to_assignments = {}
+    for site_idx in range(num_sites):
+        for band_idx in range(num_bands):
+            for label in all_site_band_nodes[site_idx][band_idx]:
+                if label not in node_to_assignments:
+                    node_to_assignments[label] = []
+                node_to_assignments[label].append((site_idx, band_idx))
+
+    # Step 2: Collect contested nodes (claimed by more than one site)
+    contested = {}
+    for label, assignments in node_to_assignments.items():
+        if len(assignments) > 1:
+            contested[label] = assignments
+
+    print("\nOverlap resolution: {} contested node(s) found across {} site(s).".format(
+        len(contested), num_sites))
+
+    if not contested:
+        print("  No overlapping nodes detected.")
+        return []
+
+    # Step 3: Per-pair statistics accumulators keyed by canonical (i, j) pair
+    pair_stats = {}
+
+    # Step 4: Resolve each contested node
+    for label, assignments in contested.items():
+        # Find the assignment with the minimum field value
+        best = assignments[0]
+        best_val = all_site_field_values[best[0]][best[1]]
+        for assignment in assignments[1:]:
+            val = all_site_field_values[assignment[0]][assignment[1]]
+            if val < best_val:
+                best_val = val
+                best = assignment
+
+        winning_site = best[0]
+
+        # Remove from every losing site and accumulate per-pair stats
+        for assignment in assignments:
+            if assignment == best:
+                continue
+            losing_site, losing_band = assignment
+            pair = (min(winning_site, losing_site), max(winning_site, losing_site))
+            if pair not in pair_stats:
+                pair_stats[pair] = {
+                    'total_contested': 0,
+                    'high_field_contested': 0,
+                    'kept_by_i': 0,
+                    'kept_by_j': 0
+                }
+            pair_stats[pair]['total_contested'] += 1
+            # High-field warning: node is in band 0 or 1 of any competing site
+            for a in assignments:
+                if a[1] <= 1:
+                    pair_stats[pair]['high_field_contested'] += 1
+                    break
+            if winning_site == pair[0]:
+                pair_stats[pair]['kept_by_i'] += 1
+            else:
+                pair_stats[pair]['kept_by_j'] += 1
+            # Remove node from the losing site's band
+            all_site_band_nodes[losing_site][losing_band].remove(label)
+
+    # Step 5: Print per-pair summary table
+    overlap_stats = []
+    print("\n" + "-" * 70)
+    print("Overlap summary (minimum-field-value assignment):")
+    print("{:<14} {:<14} {:>12} {:>12} {:>8} {:>8}".format(
+        "Site A", "Site B", "Contested", "High-field", "->A", "->B"))
+    print("-" * 70)
+    for pair in sorted(pair_stats.keys()):
+        i, j = pair
+        s = pair_stats[pair]
+        hf = s['high_field_contested']
+        warn_tag = "  *** WARNING ***" if hf > 0 else ""
+        print("{:<14} {:<14} {:>12} {:>12} {:>8} {:>8}{}".format(
+            site_names[i], site_names[j],
+            s['total_contested'], hf,
+            s['kept_by_i'], s['kept_by_j'],
+            warn_tag))
+        if hf > 0:
+            print("  WARNING: {} high-field (inner band) node(s) contested between"
+                  " '{}' and '{}'.".format(hf, site_names[i], site_names[j]))
+            print("  Check that upper/lower extents in the CSV are not too broad.")
+        overlap_stats.append({
+            'site_i': i, 'site_j': j,
+            'name_i': site_names[i], 'name_j': site_names[j],
+            'total_contested': s['total_contested'],
+            'high_field_contested': hf,
+            'kept_by_i': s['kept_by_i'], 'kept_by_j': s['kept_by_j']
+        })
+    print("-" * 70)
+
+    return overlap_stats
+
+
 def create_sinusoidal_node_sets(
     center_point,
     upper_point,
@@ -442,10 +707,8 @@ def create_sinusoidal_node_sets(
     """
     Classify nodes into bands and write sets/predefined fields to .inp file.
 
-    Reads node coordinates from the Abaqus model to classify nodes, then
-    writes *Nset and *Temperature keywords into a new output .inp file.
-    The original input file is not modified.
-    Does NOT create any CAE objects (no assembly.Set or modelDB.Temperature).
+    Used for the single-site path only. The multi-site path uses
+    classify_nodes_for_site + resolve_overlaps + write_sets_to_inp directly.
 
     Parameters:
         center_point: (x, y, z) center of the region (peak field value)
@@ -467,7 +730,6 @@ def create_sinusoidal_node_sets(
     Returns:
         dict: mapping of set names to field values
     """
-    # Get the model database (read-only, for node coordinates)
     try:
         modelDB = mdb.models[model_name]
     except KeyError:
@@ -484,7 +746,6 @@ def create_sinusoidal_node_sets(
     )
     axis_vector = normalize_vector(axis_vector)
 
-    # Calculate distances from center to upper and lower limits
     d_upper = calculate_axis_projection(upper_point, axis_vector, center_point)
     d_lower = calculate_axis_projection(lower_point, axis_vector, center_point)
 
@@ -492,7 +753,6 @@ def create_sinusoidal_node_sets(
     print("Distance to upper limit: {:.3f}".format(d_upper))
     print("Distance to lower limit: {:.3f}".format(d_lower))
 
-    # Get all nodes from the instance
     try:
         instance = assembly.instances[instance_name]
         all_nodes = instance.nodes
@@ -511,11 +771,9 @@ def create_sinusoidal_node_sets(
         except KeyError:
             print("Warning: Assembly set '{}' not found. Classifying all instance nodes.".format(cord_set_name))
 
-    # Initialize lists for each band
     band_nodes = [[] for _ in range(num_bands)]
     nodes_outside = 0
 
-    # Classify each node into a band
     print("Classifying nodes into {} bands...".format(num_bands))
     for node in all_nodes:
         if allowed_labels is not None and node.label not in allowed_labels:
@@ -531,10 +789,8 @@ def create_sinusoidal_node_sets(
 
     print("Nodes outside region: {}".format(nodes_outside))
 
-    # Calculate field values for each band
     field_values = calculate_field_values(num_bands, peak_field_value, min_field_value)
 
-    # Write to output .inp file
     print("Reading from: {}".format(inp_file))
     print("Writing to: {}".format(out_file))
     write_sets_to_inp(
@@ -549,7 +805,6 @@ def create_sinusoidal_node_sets(
         num_bands=num_bands
     )
 
-    # Print summary table
     set_field_mapping = {}
     print("\n" + "=" * 75)
     print("SUMMARY: Node Sets and Field Values")
@@ -611,12 +866,12 @@ if 'MODEL_NAME' not in dir():
     print("    LOWER_POINT = (0.0, 0.0, -10.0)")
     print("    execfile('sets_scaled_inpmod_gm_script.py')")
     print("")
-    print("  Option 2 - Multiple sites from CSV (auto-scaled):")
+    print("  Option 2 - Multiple sites from CSV (overlap detection + auto-scaled):")
     print("    MODEL_NAME = 'Model-1'")
     print("    INSTANCE_NAME = 'PART-1-1'")
     print("    INP_FILE = 'Job-212.inp'")
     print("    CORD_SET_NAME = 'Cord'")
-    print("    COORDS_FILE = 'coordinates.csv'")
+    print("    COORDS_FILE = 'coordinates_scaled.csv'")
     print("    execfile('sets_scaled_inpmod_gm_script.py')")
     print("")
     print("  CSV columns:")
@@ -631,14 +886,12 @@ elif 'INP_FILE' not in dir():
     print("")
 
 elif 'COORDS_FILE' in dir():
-    # --- Multiple sites from CSV file ---
+    # --- Multiple sites from CSV file (three-pass: classify, resolve, write) ---
     if 'PEAK_FIELD_VALUE' not in dir():
         PEAK_FIELD_VALUE = REFERENCE_PRELOAD
-    OUT_FILE = generate_output_filename(INP_FILE)
     print("Model: " + MODEL_NAME)
     print("Instance: " + INSTANCE_NAME)
     print("Input INP file: " + INP_FILE)
-    print("Output INP file: " + OUT_FILE)
     print("Peak field value: {}".format(PEAK_FIELD_VALUE))
     print("Coordinates file: " + COORDS_FILE)
     if CORD_SET_NAME:
@@ -649,55 +902,278 @@ elif 'COORDS_FILE' in dir():
     sites = read_coordinates_file(COORDS_FILE)
     print("Found {} sites in CSV file".format(len(sites)))
 
-    for idx, site in enumerate(sites):
-        site_num = idx + 1
-        print("\n" + "#" * 60)
-        print("SITE {}: {}".format(site_num, site['name']))
-        print("#" * 60)
-        print("Center: {}".format(site['center']))
-        print("Upper: {}".format(site['upper']))
-        print("Lower: {}".format(site['lower']))
+    OUT_FILE, SUMMARY_FILE = generate_overlap_filenames(
+        INP_FILE, PEAK_FIELD_VALUE, [s['name'] for s in sites])
+    print("Output INP file: " + OUT_FILE)
+    print("Summary file:    " + SUMMARY_FILE)
 
-        # Compute scaled peak value if cord distances are provided
-        if site['upper_cord_sag_dist'] is not None and site['indent_cord_sag_dist'] is not None:
-            site_peak_value = compute_scaled_peak_value(
-                upper_cord_sag_dist=site['upper_cord_sag_dist'],
-                indent_cord_sag_dist=site['indent_cord_sag_dist'],
-                reference_preload=PEAK_FIELD_VALUE,
-                ref_upper_cord_sag_dist=REF_UPPER_CORD_SAG_DIST,
-                ref_indent_cord_sag_dist=REF_INDENT_CORD_SAG_DIST
+    # Resolve model and assembly once for all sites
+    try:
+        modelDB = mdb.models[MODEL_NAME]
+    except KeyError:
+        print("Error: Model '{}' not found.".format(MODEL_NAME))
+        print("Available models: {}".format(list(mdb.models.keys())))
+        modelDB = None
+
+    if modelDB is not None:
+        assembly = modelDB.rootAssembly
+
+        # Accumulators populated in Pass 1
+        all_site_band_nodes   = []  # [site_idx][band_idx] -> list of int node labels
+        all_site_field_values = []  # [site_idx][band_idx] -> float
+        all_site_peak_values  = []  # [site_idx] -> float
+        all_site_prefixes     = []  # [site_idx] -> set_prefix string
+        site_names            = []  # [site_idx] -> site name string
+
+        # ----------------------------------------------------------------
+        # PASS 1: Classify all sites -- no writing yet
+        # ----------------------------------------------------------------
+        print("\n" + "=" * 60)
+        print("PASS 1: Classifying nodes for all {} sites".format(len(sites)))
+        print("=" * 60)
+
+        classification_ok = True
+        for idx, site in enumerate(sites):
+            site_num = idx + 1
+            print("\n" + "#" * 60)
+            print("SITE {}: {}".format(site_num, site['name']))
+            print("#" * 60)
+            print("Center: {}".format(site['center']))
+            print("Upper:  {}".format(site['upper']))
+            print("Lower:  {}".format(site['lower']))
+
+            if (site['upper_cord_sag_dist'] is not None and
+                    site['indent_cord_sag_dist'] is not None):
+                site_peak_value = compute_scaled_peak_value(
+                    upper_cord_sag_dist=site['upper_cord_sag_dist'],
+                    indent_cord_sag_dist=site['indent_cord_sag_dist'],
+                    reference_preload=PEAK_FIELD_VALUE,
+                    ref_upper_cord_sag_dist=REF_UPPER_CORD_SAG_DIST,
+                    ref_indent_cord_sag_dist=REF_INDENT_CORD_SAG_DIST
+                )
+                site_compression_ratio = (
+                    (site['upper_cord_sag_dist'] - site['indent_cord_sag_dist'])
+                    / site['indent_cord_sag_dist']
+                )
+                print("Upper cord sag dist:      {:.5f} mm".format(site['upper_cord_sag_dist']))
+                print("Indent cord sag dist:     {:.5f} mm".format(site['indent_cord_sag_dist']))
+                print("Site compression ratio:   {:.4f}".format(site_compression_ratio))
+                print("Scaled peak field value:  {:.4f}".format(site_peak_value))
+            else:
+                site_peak_value = PEAK_FIELD_VALUE
+                print("No cord distances in CSV. Using fallback PEAK_FIELD_VALUE: {}".format(
+                    site_peak_value))
+
+            set_prefix = "{}_BAND".format(site['name'].upper().replace(' ', '_'))
+
+            band_nodes = classify_nodes_for_site(
+                center_point=site['center'],
+                upper_point=site['upper'],
+                lower_point=site['lower'],
+                assembly=assembly,
+                instance_name=INSTANCE_NAME,
+                cord_set_name=CORD_SET_NAME
             )
-            site_compression_ratio = (site['upper_cord_sag_dist'] - site['indent_cord_sag_dist']) / site['indent_cord_sag_dist']
-            print("Upper cord sag dist:      {:.5f} mm".format(site['upper_cord_sag_dist']))
-            print("Indent cord sag dist:     {:.5f} mm".format(site['indent_cord_sag_dist']))
-            print("Site compression ratio:   {:.4f}".format(site_compression_ratio))
-            print("Scaled peak field value:  {:.4f}".format(site_peak_value))
-        else:
-            site_peak_value = PEAK_FIELD_VALUE
-            print("No cord distances in CSV. Using fallback PEAK_FIELD_VALUE: {}".format(site_peak_value))
 
-        set_prefix = "{}_BAND".format(site['name'].upper().replace(' ', '_'))
+            if band_nodes is None:
+                print("ERROR: Node classification failed for site {}. Aborting.".format(site_num))
+                classification_ok = False
+                break
 
-        # First site reads from the original; subsequent sites read
-        # from the output file which already contains previous sites
-        read_from = INP_FILE if idx == 0 else OUT_FILE
+            field_values = calculate_field_values(5, site_peak_value, 0.0)
 
-        create_sinusoidal_node_sets(
-            center_point=site['center'],
-            upper_point=site['upper'],
-            lower_point=site['lower'],
-            inp_file=read_from,
-            out_file=OUT_FILE,
-            peak_field_value=site_peak_value,
-            model_name=MODEL_NAME,
-            instance_name=INSTANCE_NAME,
-            set_prefix=set_prefix,
-            site_index=site_num,
-            cord_set_name=CORD_SET_NAME,
-        )
+            all_site_band_nodes.append(band_nodes)
+            all_site_field_values.append(field_values)
+            all_site_peak_values.append(site_peak_value)
+            all_site_prefixes.append(set_prefix)
+            site_names.append(site['name'])
 
-    print("\nAll {} sites processed.".format(len(sites)))
-    print("Output: {}".format(OUT_FILE))
+        if classification_ok:
+            # ----------------------------------------------------------------
+            # PASS 2: Resolve overlaps using minimum-field-value assignment
+            # ----------------------------------------------------------------
+            print("\n" + "=" * 60)
+            print("PASS 2: Resolving overlaps across {} sites".format(len(sites)))
+            print("=" * 60)
+
+            overlap_stats = resolve_overlaps(
+                all_site_band_nodes=all_site_band_nodes,
+                all_site_field_values=all_site_field_values,
+                site_names=site_names
+            )
+
+            # ----------------------------------------------------------------
+            # PASS 3: Write all resolved sites sequentially to .inp file
+            # ----------------------------------------------------------------
+            print("\n" + "=" * 60)
+            print("PASS 3: Writing all {} sites to .inp file".format(len(sites)))
+            print("=" * 60)
+
+            for idx in range(len(sites)):
+                site_num = idx + 1
+                set_prefix = all_site_prefixes[idx]
+                band_nodes = all_site_band_nodes[idx]
+                field_values = all_site_field_values[idx]
+
+                print("\n" + "-" * 60)
+                print("Writing site {}: {}".format(site_num, site_names[idx]))
+
+                read_from = INP_FILE if idx == 0 else OUT_FILE
+
+                write_sets_to_inp(
+                    inp_file=read_from,
+                    out_file=OUT_FILE,
+                    instance_name=INSTANCE_NAME,
+                    band_nodes=band_nodes,
+                    field_values=field_values,
+                    set_prefix=set_prefix,
+                    site_index=site_num,
+                    amplitude_name='Amp-1-preload',
+                    num_bands=5
+                )
+
+                print("\n" + "=" * 75)
+                print("SUMMARY: Site {} - {}".format(site_num, site_names[idx]))
+                print("=" * 75)
+                print("{:<20} {:>10} {:>15} {:<30}".format(
+                    "Node Set", "Nodes", "Field Value", "Predefined Field"))
+                print("-" * 75)
+                for band_idx in range(5):
+                    set_name = "{}_{:d}".format(set_prefix, band_idx + 1)
+                    field_name = "predefinedfield-{:d}-fieldband{:d}".format(
+                        site_num, band_idx + 1)
+                    node_count = len(band_nodes[band_idx])
+                    print("{:<20} {:>10} {:>15.3f} {:<30}".format(
+                        set_name, node_count, field_values[band_idx], field_name))
+                print("=" * 75)
+
+        print("\nAll {} sites processed.".format(len(sites)))
+        print("Output: {}".format(OUT_FILE))
+
+        # ----------------------------------------------------------------
+        # Write summary file
+        # ----------------------------------------------------------------
+        with open(SUMMARY_FILE, 'w') as sf:
+            sf.write("sets_scaled_inpmod_gm_script.py - Run Summary\n")
+            sf.write("=" * 75 + "\n\n")
+            sf.write("Model:            {}\n".format(MODEL_NAME))
+            sf.write("Instance:         {}\n".format(INSTANCE_NAME))
+            sf.write("Input INP file:   {}\n".format(INP_FILE))
+            sf.write("Output INP file:  {}\n".format(OUT_FILE))
+            sf.write("Coordinates file: {}\n".format(COORDS_FILE))
+            sf.write("Cord set filter:  {}\n".format(CORD_SET_NAME if CORD_SET_NAME else "(none)"))
+            sf.write("Sites processed:  {}\n\n".format(len(sites)))
+
+            sf.write("Overlap Resolution\n")
+            sf.write("-" * 75 + "\n")
+            sf.write("Column guide:\n")
+            sf.write("  Contested  : total nodes found in both sites' band regions before resolution\n")
+            sf.write("  High-field : contested nodes that were in an inner band (band 1 or 2,\n")
+            sf.write("               highest field values) of either site -- see warnings below\n")
+            sf.write("  ->A / ->B  : how many contested nodes were ultimately assigned to each\n")
+            sf.write("               site after applying the minimum-field-value rule\n")
+            sf.write("\n")
+            sf.write("Resolution rule: each contested node is assigned exclusively to whichever\n")
+            sf.write("site gives it the lower field value (based on that site's raised-cosine\n")
+            sf.write("band profile). It is removed from the other site's band. This ensures\n")
+            sf.write("transition zones between adjacent compression levels receive the lower\n")
+            sf.write("preload rather than being double-loaded.\n")
+            sf.write("\n")
+            if classification_ok and overlap_stats:
+                sf.write("{:<14} {:<14} {:>12} {:>12} {:>8} {:>8}\n".format(
+                    "Site A", "Site B", "Contested", "High-field", "->A", "->B"))
+                sf.write("-" * 70 + "\n")
+                for s in overlap_stats:
+                    hf = s['high_field_contested']
+                    warn_tag = "  *** WARNING ***" if hf > 0 else ""
+                    sf.write("{:<14} {:<14} {:>12} {:>12} {:>8} {:>8}{}\n".format(
+                        s['name_i'], s['name_j'],
+                        s['total_contested'], hf,
+                        s['kept_by_i'], s['kept_by_j'],
+                        warn_tag))
+                sf.write("-" * 70 + "\n")
+                sf.write("\n")
+                sf.write("Notes:\n")
+                for s in overlap_stats:
+                    hf = s['high_field_contested']
+                    total = s['total_contested']
+                    ki = s['kept_by_i']
+                    kj = s['kept_by_j']
+                    name_i = s['name_i']
+                    name_j = s['name_j']
+                    sf.write("  {name_i} vs {name_j}: {total} node(s) were found within the band\n"
+                             "    regions of both sites. After resolution, {ki} node(s) remained\n"
+                             "    assigned to {name_i} and {kj} node(s) to {name_j} (removed from\n"
+                             "    {name_i}'s bands).\n".format(
+                                 name_i=name_i, name_j=name_j,
+                                 total=total, ki=ki, kj=kj))
+                    if hf == 0:
+                        sf.write("    All contested nodes were in outer bands (low field values) --\n"
+                                 "    overlap is minor and within expected boundary behaviour.\n")
+                    else:
+                        sf.write("    *** WARNING: {hf} of the contested node(s) were in an inner\n"
+                                 "    band (high field value) of at least one site. This suggests\n"
+                                 "    the upper/lower extents defined in the CSV for {name_i} and\n"
+                                 "    {name_j} may overlap too broadly. Review the coordinates and\n"
+                                 "    consider reducing the extents to avoid significant overlap\n"
+                                 "    between these sites. ***\n".format(
+                                     hf=hf, name_i=name_i, name_j=name_j))
+            else:
+                sf.write("  No overlapping nodes detected between any pair of sites.\n")
+            sf.write("\n")
+
+            sf.write("Site Summaries\n")
+            sf.write("-" * 75 + "\n")
+            for idx in range(len(sites)):
+                site_num = idx + 1
+                set_prefix = all_site_prefixes[idx]
+                band_nodes_s = all_site_band_nodes[idx]
+                field_values_s = all_site_field_values[idx]
+                site = sites[idx]
+
+                sf.write("\n")
+                sf.write("=" * 75 + "\n")
+                sf.write("SUMMARY: Site {} - {}\n".format(site_num, site_names[idx]))
+                sf.write("=" * 75 + "\n")
+                sf.write("Center: {}\n".format(site['center']))
+                sf.write("Upper:  {}\n".format(site['upper']))
+                sf.write("Lower:  {}\n".format(site['lower']))
+                if (site['upper_cord_sag_dist'] is not None and
+                        site['indent_cord_sag_dist'] is not None):
+                    sf.write("Upper cord sag dist:  {:.5f} mm\n".format(
+                        site['upper_cord_sag_dist']))
+                    sf.write("Indent cord sag dist: {:.5f} mm\n".format(
+                        site['indent_cord_sag_dist']))
+                sf.write("Peak field value:     {:.4f}\n\n".format(
+                    all_site_peak_values[idx]))
+                sf.write("{:<20} {:>10} {:>15} {:<30}\n".format(
+                    "Node Set", "Nodes", "Field Value", "Predefined Field"))
+                sf.write("-" * 75 + "\n")
+                for band_idx in range(5):
+                    set_name = "{}_{:d}".format(set_prefix, band_idx + 1)
+                    field_name = "predefinedfield-{:d}-fieldband{:d}".format(
+                        site_num, band_idx + 1)
+                    node_count = len(band_nodes_s[band_idx])
+                    sf.write("{:<20} {:>10} {:>15.3f} {:<30}\n".format(
+                        set_name, node_count, field_values_s[band_idx], field_name))
+                sf.write("=" * 75 + "\n")
+
+        print("Summary written to: {}".format(SUMMARY_FILE))
+
+        # Re-print any high-field overlap warnings so they are visible at end of run
+        warnings = [s for s in overlap_stats if s['high_field_contested'] > 0]
+        if warnings:
+            print("\n" + "!" * 70)
+            print("OVERLAP WARNINGS - action required (see summary file for details):")
+            print("!" * 70)
+            for s in warnings:
+                print("  *** WARNING *** {name_i} vs {name_j}: {hf} high-field (inner band)"
+                      " node(s) contested.".format(
+                          name_i=s['name_i'], name_j=s['name_j'],
+                          hf=s['high_field_contested']))
+                print("  Check that upper/lower extents for these sites in the CSV"
+                      " are not too broad.")
+            print("!" * 70)
 
 else:
     # --- Single site from variables ---
