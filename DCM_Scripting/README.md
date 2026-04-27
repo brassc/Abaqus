@@ -4,9 +4,9 @@ Scripts for applying spatially-varying predefined fields to spinal cord FE model
 
 ## Scripts
 
-- **sets_scaled_inpmod_gm_script.py** ⭐ **PRIMARY — USE THIS** ⭐ — Extends `sets_scaled_inpmod_script.py` with `CORD_SET_NAME` filtering for models where the cord shares a combined part instance with other anatomy. Requires a `Cord` assembly node set (GM + WM combined). All other features identical to `sets_scaled_inpmod_script.py` (Abaqus Python 2.7).
+- **sets_scaled_inpmod_gm_script.py** ⭐ **PRIMARY — USE THIS** ⭐ — Extends `sets_scaled_inpmod_overlap.py` with `CORD_SET_NAME` filtering for models where the cord shares a combined part instance with other anatomy. Requires a `Cord` assembly node set (GM + WM combined). Includes all features: preload scaling, overlap detection and resolution, summary file output (Abaqus Python 2.7).
 - **sets_scaled_inpmod_script.py** - Extends `sets_inpmod_script.py` with automatic per-site preload scaling based on sagittal cord diameter measurements. Use only if the cord IS its own separate assembly instance (Abaqus Python 2.7).
-- **sets_scaled_inpmod_overlap.py** - Extends `sets_scaled_inpmod_script.py` with automatic detection and resolution of overlapping node assignments across multiple compression sites, plus a structured summary output file. Use this for multi-level DCM cases (Abaqus Python 2.7).
+- **sets_scaled_inpmod_overlap.py** - Extends `sets_scaled_inpmod_script.py` with automatic detection and resolution of overlapping node assignments across multiple compression sites, plus a structured summary output file. Does **not** have `CORD_SET_NAME` filtering — use `sets_scaled_inpmod_gm_script.py` instead (Abaqus Python 2.7).
 - **sets_inpmod_script.py** - Writes node sets and predefined fields directly into the `.inp` file without preload scaling. Superceded by `sets_scaled_inpmod_script.py` (Abaqus Python 2.7).
 - **sets_script.py** - Original version using the Abaqus CAE API. **Not recommended** — creates assembly-level sets via the API which can corrupt the assembly tree (see below). Retained for reference only (Abaqus Python 2.7).
 - **field_band_plot.py** - Visualises the raised cosine field distribution (Python 3, matplotlib)
@@ -44,7 +44,7 @@ LOWER_POINT      = (x, y, z)
 execfile('sets_scaled_inpmod_gm_script.py')
 ```
 
-**Option 2 — Multiple sites from CSV (auto-scaled):**
+**Option 2 — Multiple sites from CSV (auto-scaled, overlap detection applied automatically):**
 ```python
 MODEL_NAME    = 'Model-1'
 INSTANCE_NAME = 'PART-1-1'
@@ -54,11 +54,11 @@ COORDS_FILE   = 'coordinates_scaled.csv'
 execfile('sets_scaled_inpmod_gm_script.py')
 ```
 
-If `CORD_SET_NAME` is not set, all nodes in `INSTANCE_NAME` are classified (same as `sets_scaled_inpmod_script.py`).
+If `CORD_SET_NAME` is not set, all nodes in `INSTANCE_NAME` are classified.
 
 **Point placement guidance:** upper, center, and lower points define the axis vector (`normalize(upper - lower)`). Place all three on the **same face and same mesh layer** of the cord surface. Mixing mesh layers on the same face introduces an artificial tilt into the axis vector, creating non-uniform temperature across the cord cross-section. Ensure `upper_cord_sag_dist` > `indent_cord_sag_dist` — swapping these produces negative field values.
 
-All other behaviour (preload scaling, CSV format, field profile, output files) is identical to `sets_scaled_inpmod_script.py` — see that section below for full details.
+For overlap detection behaviour, output file naming, and summary file format, see the `sets_scaled_inpmod_overlap.py` section below — `sets_scaled_inpmod_gm_script.py` uses the same three-pass approach with identical output.
 
 ---
 
@@ -213,13 +213,13 @@ The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If ab
 
 This script extends `sets_scaled_inpmod_script.py` for multi-level DCM cases where compression sites at adjacent vertebral levels may have overlapping band regions. It uses a three-pass approach: classify all sites, resolve overlaps, then write the `.inp` file.
 
-### When to use this script vs `sets_scaled_inpmod_script.py`
+### When to use this script vs `sets_scaled_inpmod_gm_script.py`
 
 | Scenario | Script to use |
 |---|---|
 | Single compression site | Either script (single-site path is identical in both) |
 | Multiple non-overlapping sites | Either script |
-| Multiple sites at adjacent levels (e.g. C4/5 and C5/6) | `sets_scaled_inpmod_overlap.py` |
+| Multiple sites at adjacent levels (e.g. C4/5 and C5/6) | `sets_scaled_inpmod_gm_script.py` (primary) or this script if cord is its own instance |
 | Anterior + posterior compression at the same level | Define as **one site** in the CSV (see below), either script |
 
 ### Overlap detection and resolution rule
@@ -327,4 +327,4 @@ For each band, the script creates:
 
 Naming convention: `predefinedfield-<site_index>-fieldband<band_number>`
 
-`sets_scaled_inpmod_overlap.py` additionally writes a `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See the [Output files](#output-files) section above for naming details.
+`sets_scaled_inpmod_gm_script.py` and `sets_scaled_inpmod_overlap.py` both write a `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See the [Output files](#output-files) section above for naming details.
