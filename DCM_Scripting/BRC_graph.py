@@ -59,15 +59,18 @@ ax.set_ylabel("Maximum Logarithmic Strain (LE)")
 ax.set_ylim(0, 0.35)
 ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
 ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
-ax.grid(axis="both", linewidth=0.3, color="#cccccc", zorder=0)
+#ax.grid(axis="y", linewidth=0.3, color="#cccccc", zorder=0)
 
 # invert x so left = worse neurological function
-ax.invert_xaxis()
-ax.set_xlim(ax.get_xlim()[0], ax.get_xlim()[1] - 0.5)
+#ax.invert_xaxis()
+ax.set_xlim(ax.get_xlim()[0], ax.get_xlim()[1] + 0.5)
 
-ax.legend(frameon=False, fontsize=9, loc="upper right")
-
+ax.legend(frameon=False, fontsize=9, loc="upper left")
+ax.set_title("Maximum Single Site Strain Values Under 3 Load Types")
 fig.tight_layout()
-fig.savefig(r"C:\Users\cmb247\repos\Abaqus\DCM_Scripting\BRC_graph.png", dpi=300)
+# fig.savefig(r"C:\Users\cmb247\repos\Abaqus\DCM_Scripting\BRC_graph.pdf", dpi=300)
+fig.savefig(r"C:\Users\cmb247\repos\Abaqus\DCM_Scripting\BRC_graph_w_title.pdf", dpi=300)
+# fig.savefig(r"C:\Users\cmb247\repos\Abaqus\DCM_Scripting\BRC_graph.png", dpi=300)
+
 #plt.show()
 print("Saved BRC_graph.png")
