@@ -56,7 +56,7 @@ for i, (mjoa, row) in enumerate(df.iterrows()):
 
 ax.set_xlabel("mJOA Score")
 ax.set_ylabel("Maximum Logarithmic Strain (LE)")
-ax.set_ylim(0,0.2)
+ax.set_ylim(0, 0.35)
 ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
 ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
 ax.grid(axis="both", linewidth=0.3, color="#cccccc", zorder=0)
