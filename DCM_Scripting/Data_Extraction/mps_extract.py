@@ -12,11 +12,14 @@ from abaqusConstants import *
 import os
 
 # ============================================================
-# USER SETTINGS
+# USER SETTINGS (can be overridden by setting variables before execfile())
 # ============================================================
-ODB_PATH   = r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.odb'
-SET_NAMES  = ['PART-1-1.P44;GM', 'PART-1-1.P45;WM']
-STEP_NAME  = None   # None = last step
+if 'ODB_PATH' not in dir():
+    ODB_PATH  = r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.odb'
+if 'SET_NAMES' not in dir():
+    SET_NAMES = ['PART-1-1.P44;GM', 'PART-1-1.P45;WM']
+if 'STEP_NAME' not in dir():
+    STEP_NAME = None   # None = last step
 # ============================================================
 
 OUTPUT_DIR = os.path.dirname(ODB_PATH)
@@ -77,4 +80,4 @@ with open(out_path, 'w') as f:
         f.write('{},{},{:.6e},{},{:.6e},{:.6e}\n'.format(*r))
 
 print("Saved {} rows -> {}".format(len(rows), out_path))
-print("Set CSV_PATH in mps_analysis.py to: {}".format(out_path))
+print("Set CSV_PATH in mps_analysis.py to: \n{}".format(out_path))
