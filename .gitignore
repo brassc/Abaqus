@@ -21,6 +21,9 @@ wheels/
 *.egg
 
 
+# Patient metadata (contains identifiable data - do not sync)
+DCM_Scripting/Data_Extraction/patient_metadata.csv
+
 # Abaqus specific
 *.rpy
 *.rpy.*
