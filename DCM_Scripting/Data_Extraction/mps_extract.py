@@ -77,3 +77,4 @@ with open(out_path, 'w') as f:
         f.write('{},{},{:.6e},{},{:.6e},{:.6e}\n'.format(*r))
 
 print("Saved {} rows -> {}".format(len(rows), out_path))
+print("Set CSV_PATH in mps_analysis.py to: {}".format(out_path))
