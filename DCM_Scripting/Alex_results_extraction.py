@@ -19,7 +19,7 @@ import os
 if 'ODB_PATH' not in dir():
     raise RuntimeError("Set ODB_PATH before running this script.")
 if 'CORD_SET_NAME' not in dir():
-    CORD_SET_NAME = 'Cord'
+    CORD_SET_NAME = 'CORD'
 if 'STEP_NAME' not in dir():
     STEP_NAME = None   # None = last step
 # ============================================================
@@ -31,23 +31,53 @@ odb = openOdb(path=ODB_PATH, readOnly=True)
 step = odb.steps[STEP_NAME] if STEP_NAME else odb.steps.values()[-1]
 print("Step: '{}' ({} frames)".format(step.name, len(step.frames)))
 
-# Resolve element set - try assembly level, then instance level
+# 'Cord' is a NODE set, not an element set - LE/EVOL are element-based field
+# outputs, so getSubset(region=...) needs an element set. Derive one: every
+# element whose FULL connectivity (all nodes) lies within the Cord node set.
+# Computed once (not per frame) since connectivity doesn't change over time.
 assembly = odb.rootAssembly
-if CORD_SET_NAME in assembly.elementSets.keys():
-    elem_set = assembly.elementSets[CORD_SET_NAME]
+if CORD_SET_NAME in assembly.nodeSets.keys():
+    # Assembly-level set: nodes is a tuple of MeshNodeArray, one per instance spanned
+    node_set = assembly.nodeSets[CORD_SET_NAME]
+    if len(node_set.instances) != 1:
+        raise RuntimeError("Expected Cord node set to span exactly one instance; found {}.".format(
+            len(node_set.instances)))
+    instance = node_set.instances[0]
+    cord_node_labels = set(n.label for n in node_set.nodes[0])
 else:
-    inst_name, sname = CORD_SET_NAME.split('.', 1)
-    elem_set = assembly.instances[inst_name].elementSets[sname]
+    # Instance-level set: nodes is a flat MeshNodeArray
+    if '.' in CORD_SET_NAME:
+        inst_name, sname = CORD_SET_NAME.split('.', 1)
+        instance = assembly.instances[inst_name]
+    else:
+        matches = [inst for inst in assembly.instances.values() if CORD_SET_NAME in inst.nodeSets.keys()]
+        if len(matches) == 1:
+            instance = matches[0]
+        elif len(matches) > 1:
+            raise RuntimeError("CORD_SET_NAME '{}' found in multiple instances; "
+                                "specify as 'Instance.SetName'.".format(CORD_SET_NAME))
+        else:
+            raise RuntimeError("CORD_SET_NAME '{}' not found at assembly or "
+                                "instance level (node set).".format(CORD_SET_NAME))
+        sname = CORD_SET_NAME
+    node_set = instance.nodeSets[sname]
+    cord_node_labels = set(n.label for n in node_set.nodes)
 
-print("Processing set: '{}'".format(CORD_SET_NAME))
+cord_element_labels = set()
+for elem in instance.elements:
+    if all(nl in cord_node_labels for nl in elem.connectivity):
+        cord_element_labels.add(elem.label)
+
+print("Cord node set '{}': {} nodes -> {} fully-contained elements in instance '{}'".format(
+    CORD_SET_NAME, len(cord_node_labels), len(cord_element_labels), instance.name))
 
 rows = []
 
 for frame_idx in range(len(step.frames)):
     frame = step.frames[frame_idx]
 
-    le_subset   = frame.fieldOutputs['LE'].getSubset(region=elem_set, position=INTEGRATION_POINT)
-    evol_subset = frame.fieldOutputs['EVOL'].getSubset(region=elem_set)
+    le_subset   = frame.fieldOutputs['LE'].getSubset(region=instance, position=INTEGRATION_POINT)
+    evol_subset = frame.fieldOutputs['EVOL'].getSubset(region=instance)
 
     # Take max MPS across integration points per element.
     # Follows precedent for element-wise maximum principal strain used in
@@ -62,10 +92,13 @@ for frame_idx in range(len(step.frames)):
     elem_mps = {}
     for val in le_subset.values:
         lbl = val.elementLabel
+        if lbl not in cord_element_labels:
+            continue
         if lbl not in elem_mps or val.maxPrincipal > elem_mps[lbl]:
             elem_mps[lbl] = val.maxPrincipal
 
-    elem_vol = {val.elementLabel: val.data for val in evol_subset.values}
+    elem_vol = {val.elementLabel: val.data for val in evol_subset.values
+                if val.elementLabel in cord_element_labels}
 
     for lbl, mps in elem_mps.items():
         if lbl in elem_vol:
