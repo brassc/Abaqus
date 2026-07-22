@@ -17,7 +17,7 @@ import os
 # USER SETTINGS (can be overridden by setting variables before execfile())
 # ============================================================
 if 'ODB_PATH' not in dir():
-    ODB_PATH = r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.odb'
+    raise RuntimeError("Set ODB_PATH before running this script.")
 if 'CORD_SET_NAME' not in dir():
     CORD_SET_NAME = 'Cord'
 if 'STEP_NAME' not in dir():
