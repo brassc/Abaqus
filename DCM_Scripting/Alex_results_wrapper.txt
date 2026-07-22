@@ -1,0 +1,7 @@
+import os
+os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
+ODB_FILE='D:\\Directory\\goes\\here.odb'
+GM_SET_NAME='Section-5-P46;GM'
+WM_SET_NAME='Section-6-P47;WM'
+# extract results data to same location as .odb
+execfile('Alex_results_analysis.py')
