@@ -1,7 +1,14 @@
+# 1. In Abaqus CAE kernel:
 import os
 os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-ODB_FILE='D:\\Directory\\goes\\here.odb'
-GM_SET_NAME='Section-5-P46;GM'
-WM_SET_NAME='Section-6-P47;WM'
-# extract results data to same location as .odb
-execfile('Alex_results_analysis.py')
+ODB_PATH = 'D:\\Directory\\goes\\here.odb'
+CORD_SET_NAME = 'Cord'
+# extracts all-frame MPS + EVOL for the Cord set to a CSV next to the .odb
+execfile('Alex_results_extraction.py')
+
+# 2. Standalone Python 3 (set CSV_PATH in the script to the output above):
+# python Alex_results_plotting.py
+# -> currently a single-patient time-history diagnostic: plots % cord volume
+#    above the last-frame T95/T99 thresholds across all frames, to decide
+#    whether last-frame or peak-over-time extraction should be used for the
+#    multi-patient comparison (not yet implemented).
