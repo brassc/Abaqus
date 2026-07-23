@@ -31,7 +31,7 @@ ID_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'id_map.c
 # 'peak'  - use each element's peak (max-ever) MPS across all frames
 # Decide using Alex_results_plotting.py's single-patient time-history
 # diagnostic before running this at full cohort scale.
-FRAME_MODE = 'last'
+FRAME_MODE = 'peak'
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ============================================================
