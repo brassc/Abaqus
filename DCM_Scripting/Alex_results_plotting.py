@@ -73,9 +73,9 @@ if match.any():
     for col in ('peak_frame_t95', 'peak_frame_t99', 'last_frame_idx'):
         if col not in id_map.columns:
             id_map[col] = ''
-    id_map.loc[match, 'peak_frame_t95'] = peak_frame_t95
-    id_map.loc[match, 'peak_frame_t99'] = peak_frame_t99
-    id_map.loc[match, 'last_frame_idx'] = int(last_frame_idx)
+    id_map.loc[match, 'peak_frame_t95'] = str(peak_frame_t95)
+    id_map.loc[match, 'peak_frame_t99'] = str(peak_frame_t99)
+    id_map.loc[match, 'last_frame_idx'] = str(int(last_frame_idx))
     id_map.to_csv(ID_MAP_PATH, index=False)
     print("Logged peak frames to id_map.csv for participant P{}".format(
         int(id_map.loc[match, 'participant'].iloc[0])))
