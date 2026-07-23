@@ -39,6 +39,9 @@ DCM_Scripting/id_map.csv
 *.ipm
 *.log
 *.lck
+*.stt
+*.mdl
+*.odb_f
 
 # Virtual Environment
 venv/
