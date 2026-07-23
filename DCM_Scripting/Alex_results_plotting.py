@@ -28,7 +28,7 @@ from mps_common import volume_weighted_percentile, pct_volume_above, PLOT_STYLE
 # ============================================================
 # USER SETTINGS
 # ============================================================
-CSV_PATH = r'D:\Charlotte\ABAQUS\N31-038\Job-009-N31-038-PreOpv11-BC0pt35\Job-009-N31-038-PreOpv11-BC0pt35_0pt30_site1_site2_site3_mps.csv'
+CSV_PATH = r'D:\Charlotte\ABAQUS\N31-039\Job-002-N31-039-PreOpv6-BC0pt35\Job-002-N31-039-PreOpv6-BC0pt35_0pt30_site1_site2_mps.csv'
 ID_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'id_map.csv')
 # ============================================================
 
@@ -72,10 +72,14 @@ match = id_map['csv_path'].astype(str).str.strip() == CSV_PATH.strip()
 if match.any():
     for col in ('peak_frame_t95', 'peak_frame_t99', 'last_frame_idx'):
         if col not in id_map.columns:
-            id_map[col] = ''
-    id_map.loc[match, 'peak_frame_t95'] = str(peak_frame_t95)
-    id_map.loc[match, 'peak_frame_t99'] = str(peak_frame_t99)
-    id_map.loc[match, 'last_frame_idx'] = str(int(last_frame_idx))
+            id_map[col] = pd.NA
+        # Force object dtype - column may have been inferred as float64/string
+        # on read (numeric-looking values + blanks), which rejects int/str
+        # assignment under pandas's strict dtype casting.
+        id_map[col] = id_map[col].astype('object')
+    id_map.loc[match, 'peak_frame_t95'] = peak_frame_t95
+    id_map.loc[match, 'peak_frame_t99'] = peak_frame_t99
+    id_map.loc[match, 'last_frame_idx'] = int(last_frame_idx)
     id_map.to_csv(ID_MAP_PATH, index=False)
     print("Logged peak frames to id_map.csv for participant P{}".format(
         int(id_map.loc[match, 'participant'].iloc[0])))
