@@ -1,7 +1,7 @@
 """
 Alex_results_multipatient_plot.py - Pool MPS data across all patients to
-compute cohort-wide volume-weighted 95th/99th percentile MPS thresholds
-(T95, T99), then plot, per patient, the % of their own cord volume that
+compute cohort-wide volume-weighted 90th/95th/99th percentile MPS thresholds
+(T90, T95, T99), then plot, per patient, the % of their own cord volume that
 exceeds each threshold. X axis is the anonymized participant number.
 
 Reads DCM_Scripting/id_map.csv (gitignored - real patient IDs, never
@@ -72,17 +72,20 @@ if not per_patient:
     raise SystemExit("No patient data loaded - fill in csv_path in id_map.csv first.")
 
 # Pool ALL patients' reduced (element, mps, volume) rows to compute cohort-wide
-# volume-weighted T95/T99. Elements weighted by volume, not counted equally -
+# volume-weighted T90/T95/T99. Elements weighted by volume, not counted equally -
 # correct across patients with different cord sizes/mesh densities.
 pooled = pd.concat(per_patient.values(), ignore_index=True)
+t90 = volume_weighted_percentile(pooled, p=0.90)
 t95 = volume_weighted_percentile(pooled, p=0.95)
 t99 = volume_weighted_percentile(pooled, p=0.99)
-print("Cohort-pooled thresholds (FRAME_MODE='{}'): T95={:.4f}  T99={:.4f}".format(FRAME_MODE, t95, t99))
+print("Cohort-pooled thresholds (FRAME_MODE='{}'): T90={:.4f}  T95={:.4f}  T99={:.4f}".format(
+    FRAME_MODE, t90, t95, t99))
 
 records = []
 for participant, df in sorted(per_patient.items()):
     records.append({
         'participant':    'P{}'.format(participant),
+        'pct_above_t90':  pct_volume_above(df, t90),
         'pct_above_t95':  pct_volume_above(df, t95),
         'pct_above_t99':  pct_volume_above(df, t99),
     })
@@ -94,6 +97,8 @@ print(summary.to_string(index=False))
 
 fig, ax = plt.subplots(figsize=(6, 4.5))
 x = range(len(summary))
+ax.scatter(x, summary['pct_above_t90'], label='% volume >= T90 ({:.4f})'.format(t90),
+           color='#548235', marker='s', s=60, zorder=3)
 ax.scatter(x, summary['pct_above_t95'], label='% volume >= T95 ({:.4f})'.format(t95),
            color='#2e75b6', marker='o', s=60, zorder=3)
 ax.scatter(x, summary['pct_above_t99'], label='% volume >= T99 ({:.4f})'.format(t99),
