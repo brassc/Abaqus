@@ -28,7 +28,7 @@ from mps_common import volume_weighted_percentile, pct_volume_above, PLOT_STYLE
 # ============================================================
 # USER SETTINGS
 # ============================================================
-CSV_PATH = r'D:\Charlotte\ABAQUS\N01-016\Job-006-N01-016-Pre-Op-bettercordmesh\Job-006-N01-016-Pre-Op-bettercordmesh_0pt30_Site1a_Site2a_mps.csv'
+CSV_PATH = r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4_mps.csv'
 ID_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'id_map.csv')
 # ============================================================
 
