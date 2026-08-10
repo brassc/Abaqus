@@ -1,7 +1,7 @@
 # 1. In Abaqus CAE kernel:
 import os
 os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-ODB_PATH = 'D:\\Charlotte\\ABAQUS\\N31-038\\Job-009-N31-038-PreOpv11-BC0pt35\\Job-009-N31-038-PreOpv11-BC0pt35_0pt30_site1_site2_site3.odb'
+ODB_PATH = 'D:\Charlotte\ABAQUS\N01-014\Job-011-N01-014-Pre-Opv8-BCminus0pt175\Job-011-N01-014-Pre-Opv8-BCminus0pt175_0pt30_Site1_Site2.odb'
 CORD_SET_NAME = 'CORD'
 # extracts all-frame MPS + EVOL for the Cord set to a CSV next to the .odb
 execfile('Alex_results_extraction.py')
@@ -15,7 +15,7 @@ execfile('Alex_results_extraction.py')
 # 3. Fill in odb_path/csv_path per participant in id_map.csv (gitignored -
 #    real patient IDs never leave this file), then:
 # python Alex_results_multipatient_plot.py
-# -> pools all patients' MPS/EVOL to get cohort-wide T95/T99, then plots %
+# -> pools all patients' MPS/EVOL to get cohort-wide T95/T99/T90, then plots %
 #    cord volume above each threshold per patient (x axis = anonymized
 #    participant number, e.g. P6). Only this small aggregated summary CSV
 #    and plot are safe to commit - never the raw per-frame extraction CSVs.
