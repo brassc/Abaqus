@@ -223,3 +223,293 @@ make_comparison_plot(manual_summary, MANUAL_THRESHOLDS, MANUAL_THRESHOLD_COLORS,
 
 print("Summary saved: {}".format(manual_summary_path))
 print("Plot saved: {}".format(manual_plot_path))
+
+# ============================================================
+# Third plot: cumulative blob-size distribution (spatial clustering).
+# Distinguishes a few large contiguous high-strain regions ("blob") from
+# many small scattered ones ("chicken pox"), for all 4 manual thresholds and
+# both loading conditions at once. Blobs are connected components of
+# exceeding-threshold elements (face-sharing adjacency, approximated as
+# >=4 shared nodes),
+# pooled across ALL patients per (threshold, condition) - same pooling
+# convention already used above for the percentile/manual thresholds - so
+# this produces 4 thresholds x 2 conditions = 8 curves, not one per patient.
+#
+# Requires the companion '<basename>_topology.csv' files (element
+# connectivity) next to each '_mps.csv', derived from csv_path by suffix
+# swap - re-run Alex_results_extraction.py per patient/condition to
+# generate them if missing (older extractions won't have them yet).
+#
+# Reuses id_map, per_patient, MANUAL_THRESHOLDS, MANUAL_THRESHOLD_COLORS,
+# OUT_DIR, Line2D already loaded/defined above - does not modify anything
+# above this point.
+# ============================================================
+import math
+from collections import defaultdict
+
+BLOB_FACE_SHARING_MIN_NODES = 4   # >=4 shared nodes approximates shared face (all elements are C3D8)
+BLOB_CONDITION_LINESTYLES = {'flexion': '-', 'extension': '--'}
+
+
+def load_adjacency_edges(topology_path, min_shared_nodes=BLOB_FACE_SHARING_MIN_NODES):
+    elem_nodes = {}
+    with open(topology_path) as f:
+        next(f)  # header
+        for line in f:
+            label_str, nodes_str = line.strip().split(',', 1)
+            elem_nodes[int(label_str)] = set(int(n) for n in nodes_str.split(';'))
+
+    node_to_elems = defaultdict(list)
+    for elem, nodes in elem_nodes.items():
+        for n in nodes:
+            node_to_elems[n].append(elem)
+
+    shared_count = defaultdict(int)
+    for n, elems in node_to_elems.items():
+        elems = sorted(elems)
+        for i in range(len(elems)):
+            for j in range(i + 1, len(elems)):
+                shared_count[(elems[i], elems[j])] += 1
+
+    return [pair for pair, cnt in shared_count.items() if cnt >= min_shared_nodes]
+
+
+class _BlobUnionFind(object):
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, x):
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[ra] = rb
+
+
+def find_blobs(exceeding_labels, edges):
+    uf = _BlobUnionFind()
+    for lbl in exceeding_labels:
+        uf.find(lbl)   # register as singleton
+    for a, b in edges:
+        if a in exceeding_labels and b in exceeding_labels:
+            uf.union(a, b)
+
+    groups = defaultdict(list)
+    for lbl in exceeding_labels:
+        groups[uf.find(lbl)].append(lbl)
+    return list(groups.values())
+
+
+# Cache adjacency edges per (participant, condition) - reused across all 4 thresholds
+blob_adjacency_cache = {}
+blob_missing_topology = []
+
+for _, row in id_map.iterrows():
+    blob_participant = int(row['participant'])
+    blob_condition = str(row.get('loading_condition', '')).strip()
+    blob_csv_path = str(row.get('csv_path', '')).strip()
+    blob_key = (blob_participant, blob_condition)
+    if blob_key not in per_patient or not blob_csv_path or blob_csv_path.lower() == 'nan':
+        continue
+    blob_topology_path = blob_csv_path.replace('_mps.csv', '_topology.csv')
+    if not os.path.isfile(blob_topology_path):
+        blob_missing_topology.append(blob_key)
+        continue
+    blob_adjacency_cache[blob_key] = load_adjacency_edges(blob_topology_path)
+
+if blob_missing_topology:
+    print("Skipping {} patient/condition(s) missing '_topology.csv' for blob analysis "
+          "(re-run Alex_results_extraction.py to generate it):".format(len(blob_missing_topology)))
+    for blob_participant, blob_condition in blob_missing_topology:
+        print("  P{} ({})".format(blob_participant, blob_condition))
+
+# For each (threshold, condition), pool blobs from every patient with adjacency data
+blob_records = []
+blob_pooled = defaultdict(list)   # (threshold_name, condition) -> list of (r, volume)
+
+for blob_threshold_name, blob_threshold_val in MANUAL_THRESHOLDS.items():
+    for (blob_participant, blob_condition), blob_edges in blob_adjacency_cache.items():
+        blob_df_patient = per_patient[(blob_participant, blob_condition)]
+        blob_vol_lookup = dict(zip(blob_df_patient['element_label'], blob_df_patient['volume']))
+        blob_exceeding = set(blob_df_patient.loc[blob_df_patient['mps'] >= blob_threshold_val, 'element_label'])
+        if not blob_exceeding:
+            continue
+        for blob in find_blobs(blob_exceeding, blob_edges):
+            blob_volume = sum(blob_vol_lookup[lbl] for lbl in blob)
+            blob_r = (3.0 * blob_volume / (4.0 * math.pi)) ** (1.0 / 3.0)
+            blob_pooled[(blob_threshold_name, blob_condition)].append((blob_r, blob_volume))
+            blob_records.append({
+                'participant':       'P{}'.format(blob_participant),
+                'loading_condition': blob_condition,
+                'threshold':         blob_threshold_name,
+                'n_elements':        len(blob),
+                'volume':            blob_volume,
+                'r':                 blob_r,
+            })
+
+blob_df = pd.DataFrame(blob_records)
+blob_summary_path = os.path.join(OUT_DIR, 'multipatient_blob_distribution_summary.csv')
+blob_df.to_csv(blob_summary_path, index=False)
+print("Blob summary saved: {}".format(blob_summary_path))
+
+blob_fig, blob_ax = plt.subplots(figsize=(7.5, 5.5))
+
+# Common left/right edge across ALL curves in this plot, so every curve is
+# explicitly extended to it (0% at the left edge, held flat at its own final
+# value out to the right edge) - otherwise a curve whose own r-range is
+# narrower than another curve's just stops short, appearing to "float" in
+# the middle of the axes instead of spanning it.
+blob_all_r = [r for blobs in blob_pooled.values() for r, _ in blobs]
+blob_r_min = min(blob_all_r) * 0.9
+blob_r_max = max(blob_all_r) * 1.1
+
+# Normalize each curve by TOTAL CORD VOLUME (pooled across the same patients
+# that contributed blobs for that condition), not by the curve's own
+# exceeding-volume subset. This is a fixed, threshold-independent
+# denominator, so a curve's final height shows the real % of cord volume
+# exceeding that threshold (comparable across curves/thresholds), instead
+# of every curve being forced to reach 100% regardless of magnitude.
+blob_cord_vol_by_condition = defaultdict(float)
+for (blob_p, blob_c) in blob_adjacency_cache:
+    blob_cord_vol_by_condition[blob_c] += per_patient[(blob_p, blob_c)]['volume'].sum()
+
+for (blob_threshold_name, blob_condition), blobs in sorted(blob_pooled.items()):
+    blobs_sorted = sorted(blobs, key=lambda b: b[0])
+    blob_total_vol = blob_cord_vol_by_condition[blob_condition]
+    if blob_total_vol <= 0:
+        continue
+    blob_rs = [blob_r_min] + [b[0] for b in blobs_sorted] + [blob_r_max]
+    blob_cum_vol = 0.0
+    blob_cum_pct = [0.0]
+    for _, v in blobs_sorted:
+        blob_cum_vol += v
+        blob_cum_pct.append(100.0 * blob_cum_vol / blob_total_vol)
+    blob_cum_pct.append(blob_cum_pct[-1])   # hold flat at final value out to the right edge
+
+    blob_color = MANUAL_THRESHOLD_COLORS[blob_threshold_name]
+    blob_linestyle = BLOB_CONDITION_LINESTYLES.get(blob_condition.strip().lower(), ':')
+    # steps-post: cumulative % already includes the blob at each r, so it
+    # should hold flat until the next (larger) blob's r, not interpolate
+    # diagonally as if intermediate blob sizes existed between them.
+    blob_ax.plot(blob_rs, blob_cum_pct, color=blob_color, linestyle=blob_linestyle, linewidth=1.5,
+                 drawstyle='steps-post')
+
+blob_ax.set_xscale('log')
+blob_ax.set_xlim(blob_r_min, blob_r_max)
+blob_ax.set_ylim(0, 100)
+blob_ax.set_xlabel('Blob effective radius r (mm)') #equivalent sphere
+blob_ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
+
+blob_threshold_handles = [Line2D([0], [0], color=MANUAL_THRESHOLD_COLORS[name], linestyle='-',
+                                  label='{:.2f}'.format(val))
+                           for name, val in MANUAL_THRESHOLDS.items()]
+blob_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
+                           for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
+
+blob_threshold_legend = blob_ax.legend(handles=blob_threshold_handles, loc='upper left',
+                                        frameon=False, title='Threshold')
+blob_ax.add_artist(blob_threshold_legend)
+blob_ax.legend(handles=blob_condition_handles, loc='lower right', frameon=False, title='Loading condition')
+
+blob_fig.tight_layout()
+blob_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution.pdf')
+blob_fig.savefig(blob_plot_path, bbox_inches='tight')
+plt.close(blob_fig)
+
+print("Plot saved: {}".format(blob_plot_path))
+
+# ============================================================
+# Fourth plot: per-patient faceted breakdown of the same blob distribution,
+# one curve per (patient, condition). Each patient's curve is normalized to
+# THEIR OWN total cord volume (fixed regardless of threshold), so a curve's
+# final height shows the real % of that patient's cord exceeding the
+# threshold - comparable across patients and across thresholds, rather than
+# every curve being forced to reach 100% regardless of magnitude. Produces
+# one figure per threshold
+# (4 total) plus a single 2x2 grid image combining all four. Reuses blob_df,
+# MANUAL_THRESHOLDS, BLOB_CONDITION_LINESTYLES, OUT_DIR, Line2D, pd, plt, os
+# already loaded/defined above - does not modify anything above this point.
+# ============================================================
+pp_patients_sorted = sorted(blob_df['participant'].unique(), key=lambda p: int(p[1:]))
+pp_patient_colors = {p: plt.cm.tab10(i % 10) for i, p in enumerate(pp_patients_sorted)}
+
+# Common x/y range across ALL thresholds, so every panel is directly
+# comparable - otherwise each panel auto-scales to its own data subset,
+# which makes cross-threshold shifts misleading rather than informative.
+pp_r_min = blob_df['r'].min()
+pp_r_max = blob_df['r'].max()
+pp_xlim = (pp_r_min * 0.9, pp_r_max * 1.1)
+pp_ylim = (0, 102)
+
+# Each patient's TOTAL CORD VOLUME (not their exceeding-volume subset) -
+# fixed regardless of threshold, so a curve's final height shows the real %
+# of that patient's cord exceeding the threshold, comparable across
+# thresholds and patients instead of every curve being forced to 100%.
+pp_total_cord_vol = {key: df['volume'].sum() for key, df in per_patient.items()}
+
+
+def pp_plot_threshold(ax, threshold_name):
+    sub = blob_df[blob_df['threshold'] == threshold_name]
+    for (pp_participant, pp_condition), grp in sub.groupby(['participant', 'loading_condition']):
+        grp_sorted = grp.sort_values('r')
+        pp_participant_num = int(pp_participant[1:])   # 'P6' -> 6, to match per_patient's int key
+        pp_total_vol = pp_total_cord_vol.get((pp_participant_num, pp_condition), 0.0)
+        if pp_total_vol <= 0:
+            continue
+        pp_cum_pct = list(100.0 * grp_sorted['volume'].cumsum() / pp_total_vol)
+        # Extend to the shared axis edges (0% at the left, held flat at the
+        # final value out to the right) so the curve doesn't stop short and
+        # appear to float in the middle of the panel.
+        pp_rs = [pp_xlim[0]] + list(grp_sorted['r']) + [pp_xlim[1]]
+        pp_ys = [0.0] + pp_cum_pct + [pp_cum_pct[-1]]
+        pp_color = pp_patient_colors[pp_participant]
+        pp_linestyle = BLOB_CONDITION_LINESTYLES.get(pp_condition.strip().lower(), ':')
+        ax.plot(pp_rs, pp_ys, color=pp_color, linestyle=pp_linestyle, linewidth=1.2,
+                drawstyle='steps-post')
+    ax.set_xscale('log')
+    ax.set_xlim(pp_xlim)
+    ax.set_ylim(pp_ylim)
+    ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), MANUAL_THRESHOLDS[threshold_name]))
+    ax.set_xlabel('Blob effective radius r (mm)')
+    ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
+
+
+pp_patient_handles = [Line2D([0], [0], color=pp_patient_colors[p], linestyle='-', label=p)
+                       for p in pp_patients_sorted]
+pp_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
+                         for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
+
+# --- Four individual per-threshold plots ---
+for pp_threshold_name in MANUAL_THRESHOLDS:
+    pp_fig, pp_ax = plt.subplots(figsize=(7, 5.5))
+    pp_plot_threshold(pp_ax, pp_threshold_name)
+
+    pp_patient_legend = pp_ax.legend(handles=pp_patient_handles, loc='upper left', frameon=False,
+                                      title='Patient', fontsize=8)
+    pp_ax.add_artist(pp_patient_legend)
+    pp_ax.legend(handles=pp_condition_handles, loc='lower right', frameon=False, title='Loading condition')
+
+    pp_fig.tight_layout()
+    pp_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_{}.pdf'.format(
+        pp_threshold_name))
+    pp_fig.savefig(pp_plot_path, bbox_inches='tight')
+    plt.close(pp_fig)
+    print("Plot saved: {}".format(pp_plot_path))
+
+# --- Combined 2x2 grid of all four thresholds in one image ---
+pp_grid_fig, pp_grid_axes = plt.subplots(2, 2, figsize=(13, 10))
+for pp_ax_grid, pp_threshold_name in zip(pp_grid_axes.flat, MANUAL_THRESHOLDS):
+    pp_plot_threshold(pp_ax_grid, pp_threshold_name)
+
+pp_grid_fig.legend(handles=pp_patient_handles + pp_condition_handles,
+                    loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
+pp_grid_fig.tight_layout()
+pp_grid_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_grid.pdf')
+pp_grid_fig.savefig(pp_grid_plot_path, bbox_inches='tight')
+plt.close(pp_grid_fig)
+print("Plot saved: {}".format(pp_grid_plot_path))

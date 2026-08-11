@@ -116,4 +116,20 @@ with open(out_path, 'w') as f:
 print("Saved {} rows -> {}".format(len(rows), out_path))
 print("Add this path to id_map.csv 'csv_path' column for this participant.")
 
+# --- Element connectivity (topology), for spatial clustering analysis
+# (blob vs scattered strain distribution) downstream. One-time per
+# patient/condition since connectivity doesn't change over time. This is a
+# separate file with a different suffix ('_topology.csv' vs '_mps.csv') -
+# purely additive, does not touch the CSV written above. No id_map.csv
+# column needed for it either: downstream code derives this path from
+# csv_path by swapping the suffix (same directory, same basename).
+topology_path = os.path.join(OUTPUT_DIR, '{}_topology.csv'.format(odb_basename))
+with open(topology_path, 'w') as f:
+    f.write('element_label,nodes\n')
+    for elem in instance.elements:
+        if elem.label in cord_element_labels:
+            nodes = ';'.join(str(n) for n in elem.connectivity)
+            f.write('{},{}\n'.format(elem.label, nodes))
+print("Saved topology for {} elements -> {}".format(len(cord_element_labels), topology_path))
+
 odb.close()
