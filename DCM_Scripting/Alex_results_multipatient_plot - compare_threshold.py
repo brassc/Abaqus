@@ -513,3 +513,119 @@ pp_grid_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distributi
 pp_grid_fig.savefig(pp_grid_plot_path, bbox_inches='tight')
 plt.close(pp_grid_fig)
 print("Plot saved: {}".format(pp_grid_plot_path))
+
+# ============================================================
+# Fifth plot: manual-threshold comparison (0.05/0.10/0.15/0.20) INCLUDING
+# both PreOp and PostOp states, per patient - a separate, new plot, not a
+# modification of the PreOp-only manual-thresholds plot earlier in this
+# file. Same visual encoding as that plot (color = threshold, marker shape =
+# loading condition), plus marker FILL for state: solid = PreOp, hollow =
+# PostOp. Flexion/Extension pairs are connected only within the same state.
+# Single combined legend to the right of the plot (not overlapping it),
+# grouped into Threshold / Loading condition / State sections.
+#
+# Builds its own (participant, condition, state) -> reduced DataFrame dict
+# from id_map's 'State' column (independent of per_patient above, which is
+# PreOp-only) - reuses id_map, reduce_to_frame_mode, pct_volume_above,
+# MANUAL_THRESHOLDS, MANUAL_THRESHOLD_COLORS, CONDITION_MARKERS, OUT_DIR,
+# Line2D, pd, plt, os already loaded/defined above - does not modify
+# anything above this point.
+# ============================================================
+STATE_FILLED = {'preop': True, 'postop': False}   # solid marker vs hollow marker
+
+state_per_patient = {}   # (participant, loading_condition, state) -> reduced DataFrame, ALL states
+state_missing = []
+for _, row in id_map.iterrows():
+    state_csv_path = str(row.get('csv_path', '')).strip()
+    state_condition = str(row.get('loading_condition', '')).strip()
+    state_state = str(row.get('State', '')).strip() or 'PreOp'
+    if not state_csv_path or state_csv_path.lower() == 'nan' or not os.path.isfile(state_csv_path):
+        state_missing.append((int(row['participant']), state_condition, state_state))
+        continue
+    state_df_raw = pd.read_csv(state_csv_path)
+    state_per_patient[(int(row['participant']), state_condition, state_state)] = reduce_to_frame_mode(
+        state_df_raw, FRAME_MODE)
+
+if state_missing:
+    print("Skipping {} row(s) with no csv_path set in id_map.csv (or file not found) "
+          "for PreOp/PostOp plot:".format(len(state_missing)))
+    for sp, sc, ss in state_missing:
+        print("  P{} ({}, {})".format(sp, sc, ss))
+
+state_records = []
+for (state_participant, state_condition, state_state), state_df in sorted(state_per_patient.items()):
+    state_record = {'participant': 'P{}'.format(state_participant), 'loading_condition': state_condition,
+                     'state': state_state}
+    for name, val in MANUAL_THRESHOLDS.items():
+        state_record['pct_above_{}'.format(name)] = pct_volume_above(state_df, val)
+    state_records.append(state_record)
+state_summary = pd.DataFrame(state_records)
+
+state_summary_path = os.path.join(
+    OUT_DIR, 'multipatient_mps_summary_compare_thresholds_manual_thresholds_prepost.csv')
+state_summary.to_csv(state_summary_path, index=False)
+print(state_summary.to_string(index=False))
+
+state_participants = sorted(state_summary['participant'].unique(), key=lambda p: int(p[1:]))
+state_x_pos = {p: i for i, p in enumerate(state_participants)}
+
+# Plot only shows T0.10/T0.15 (summary CSV above still has all 4 thresholds
+# for reference) - keeps this comparison plot readable.
+STATE_PLOT_THRESHOLDS = {'t0p10': MANUAL_THRESHOLDS['t0p10'], 't0p15': MANUAL_THRESHOLDS['t0p15']}
+
+state_fig, state_ax = plt.subplots(figsize=(9, 5.5))
+
+for state_threshold_name in STATE_PLOT_THRESHOLDS:
+    state_col = 'pct_above_{}'.format(state_threshold_name)
+    state_color = MANUAL_THRESHOLD_COLORS[state_threshold_name]
+    # Connect Flexion<->Extension pairs within the SAME state only
+    for (_, _), grp in state_summary.groupby(['participant', 'state']):
+        if len(grp) == 2:
+            xp = state_x_pos[grp['participant'].iloc[0]]
+            state_ax.vlines(xp, grp[state_col].min(), grp[state_col].max(),
+                             color=state_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for (condition, state), grp in state_summary.groupby(['loading_condition', 'state']):
+        marker = CONDITION_MARKERS.get(condition.strip().lower(), 'o')
+        filled = STATE_FILLED.get(state.strip().lower(), True)
+        xs = [state_x_pos[p] for p in grp['participant']]
+        if filled:
+            state_ax.scatter(xs, grp[state_col], color=state_color, marker=marker, s=55, zorder=3)
+        else:
+            state_ax.scatter(xs, grp[state_col], facecolors='none', edgecolors=state_color, marker=marker,
+                              s=55, linewidths=1.3, zorder=3)
+
+# Single combined legend to the right of the plot (not overlapping), grouped
+# into Threshold / Loading condition / State sections via blank header entries.
+state_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=MANUAL_THRESHOLD_COLORS[name],
+                                   label='{:.2f}'.format(val))
+                            for name, val in STATE_PLOT_THRESHOLDS.items()]
+state_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                            for cond, marker in CONDITION_MARKERS.items()]
+state_state_handles = [
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='PreOp'),
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='PostOp'),
+]
+state_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+state_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + state_threshold_handles +
+    [state_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + state_condition_handles +
+    [state_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='State')] + state_state_handles
+)
+state_ax.legend(handles=state_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+state_ax.set_xticks(range(len(state_participants)))
+state_ax.set_xticklabels(state_participants)
+state_ax.set_xlabel('Participant')
+state_ax.set_ylabel('% cord volume above threshold')
+state_fig.tight_layout()
+
+state_plot_path = os.path.join(
+    OUT_DIR, 'multipatient_mps_plot_compare_thresholds_manual_thresholds_prepost.pdf')
+state_fig.savefig(state_plot_path, bbox_inches='tight')
+plt.close(state_fig)
+
+print("Summary saved: {}".format(state_summary_path))
+print("Plot saved: {}".format(state_plot_path))
