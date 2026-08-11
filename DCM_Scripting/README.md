@@ -328,3 +328,73 @@ For each band, the script creates:
 Naming convention: `predefinedfield-<site_index>-fieldband<band_number>`
 
 `sets_scaled_inpmod_gm_script.py` and `sets_scaled_inpmod_overlap.py` both write a `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See the [Output files](#output-files) section above for naming details.
+
+---
+
+## Results Extraction and Analysis
+
+Post-processing pipeline for extracting maximum principal strain (MPS) and volume (EVOL) from the `Cord` set across completed jobs, and comparing strain-exceedance patterns across patients, loading conditions (flexion/extension), and surgical state (pre-op/post-op).
+
+### Scripts
+
+- **Alex_results_extraction.py** (Abaqus kernel, Python 2.7) — extracts max-MPS-over-integration-points and EVOL for every element in the `Cord` set, for every frame of the step. `Cord` is a **node** set, not an element set, so the script derives the element set itself: every element whose full connectivity (all nodes) lies within the `Cord` node set. Writes two files next to the `.odb`:
+  - `<basename>_mps.csv` — one row per element per frame (`frame_index, frame_value, element_label, mps, volume`)
+  - `<basename>_topology.csv` — element connectivity (`element_label, nodes`, semicolon-separated node labels), used later for spatial clustering ("blob") analysis
+
+  Also auto-updates `id_map.csv`: after writing, it finds the row whose `odb_path` matches the `ODB_PATH` you set and fills in `csv_path` — no manual copy-paste needed. If no matching row exists yet, it prints a warning instead of failing.
+
+- **mps_common.py** (Python 3) — shared helpers used by every script below:
+  - `volume_weighted_percentile(df, p)` — the MPS value below which fraction `p` of total *volume* (not element count) lies. Weighting by volume rather than counting elements equally matters when comparing regions/patients with different mesh densities.
+  - `pct_volume_above(df, threshold)` — % of total volume with `mps >= threshold`.
+  - `PLOT_STYLE` — shared matplotlib rcParams.
+
+- **Alex_results_plotting.py** (Python 3) — single-patient time-history diagnostic. Point `CSV_PATH` at one patient's `_mps.csv`. Computes T95/T99 from the **last frame**, then tracks % volume above those thresholds across **every** frame, to check whether exceedance peaks at the final frame or earlier in the simulation. Prints and logs the result to `id_map.csv` (matched by `csv_path`) in three new columns: `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx`. Run this once per patient/condition to build a peak-frame log across the cohort — it's what decides `FRAME_MODE` below.
+
+- **Alex_results_multipatient_plot - compare_threshold.py** (Python 3) — the main cross-patient comparison script. Reads `id_map.csv`, loads every patient's `_mps.csv`, and produces five plots in one run (see [Output plots](#output-plots) below).
+
+### `id_map.csv`
+
+Gitignored — maps an anonymized participant number to the real patient ID and file paths, so no real ID ever appears in anything committed to the repo.
+
+| Column | Meaning |
+|---|---|
+| `participant` | Anonymized number (e.g. `6` → labeled `P6` in all plots/summaries) |
+| `id` | Real patient/hospital ID — never leaves this file |
+| `mJOA` | Pre-operative mJOA score |
+| `loading_condition` | `Flexion` or `Extension` |
+| `State` | `PreOp` or `PostOp` |
+| `odb_path` | Full path to the job's `.odb` |
+| `csv_path` | Full path to the `_mps.csv` (auto-filled by `Alex_results_extraction.py`) |
+| `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx` | Logged by `Alex_results_plotting.py`'s diagnostic |
+
+**Anonymization boundary:** `id_map.csv` and the raw per-frame `_mps.csv`/`_topology.csv` files (which live next to the `.odb`, typically on `D:\`, outside the repo) are never committed. Only the aggregated summary CSVs and plots produced by the multipatient script — keyed solely by `P{n}` — are safe to commit.
+
+### Usage
+
+1. Add a row to `id_map.csv` for the new patient/condition/state (`participant, id, mJOA, loading_condition, State, odb_path` — leave `csv_path` blank).
+2. In the Abaqus kernel:
+   ```python
+   ODB_PATH = r'D:\path\to\Job-xxx.odb'
+   execfile('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting\\Alex_results_extraction.py')
+   ```
+   `csv_path` gets filled in automatically once this finishes.
+3. Run `Alex_results_plotting.py` on at least one representative patient's CSV to check whether strain exceedance peaks at the final frame or earlier. If it peaks earlier and relaxes by the end, use `FRAME_MODE = 'peak'` (each element's max-ever MPS across all frames); if it peaks at the final frame, `'last'` is adequate.
+4. Set `FRAME_MODE` at the top of `Alex_results_multipatient_plot - compare_threshold.py` accordingly, then run it (`python "Alex_results_multipatient_plot - compare_threshold.py"`).
+
+### Output plots
+
+| File | Shows |
+|---|---|
+| `multipatient_mps_plot_compare_thresholds.pdf` | % cord volume above T90/T95/T99 (cohort-pooled volume-weighted percentiles) per patient, flexion vs extension (PreOp only) |
+| `multipatient_mps_plot_compare_thresholds_manual_thresholds.pdf` | Same style, fixed MPS thresholds 0.05/0.10/0.15/0.20 instead of percentiles (PreOp only) |
+| `multipatient_mps_plot_blob_distribution.pdf` | Cumulative % of total cord volume above each threshold, by spatial cluster ("blob") size — pooled across all patients per (threshold, condition). Distinguishes a few large contiguous high-strain regions from many small scattered ones |
+| `multipatient_mps_plot_blob_distribution_perpatient_*.pdf` (×4) + `..._perpatient_grid.pdf` | Same blob analysis, faceted per patient (one curve per patient, normalized to their own total cord volume) instead of pooled — one plot per threshold, plus a combined 2×2 grid |
+| `multipatient_mps_plot_compare_thresholds_manual_thresholds_prepost.pdf` | Manual-threshold comparison (0.10/0.15 shown) **including PostOp** — solid markers = PreOp, hollow = PostOp |
+
+Every plot has a matching `_summary.csv` written alongside it.
+
+### Methodology notes
+
+- **Volume-weighted, not element-count-weighted**: percentiles and thresholds are always computed by volume, so a coarse-meshed region can't be outvoted by a fine-meshed one just because it has more elements.
+- **Blob clustering**: elements exceeding a threshold are grouped into connected components using face-sharing adjacency between elements (approximated as **≥4 shared nodes** — exact for this mesh since it's all `C3D8` hex elements, but not a formal face check against each element's specific face-node groups). Each blob's volume is converted to an effective radius via `r = (3V / 4π)^(1/3)` (equivalent-sphere radius). Cumulative distributions are drawn as step functions (`drawstyle='steps-post'`), not diagonally-interpolated lines, since nothing actually accumulates between one blob's size and the next.
+- **FRAME_MODE**: `'last'` uses each element's MPS at the final frame; `'peak'` uses its max-ever MPS across all frames. Strain can spike mid-simulation and relax by the end, in which case `'last'` would underestimate true exposure — this is why the single-patient diagnostic exists.
