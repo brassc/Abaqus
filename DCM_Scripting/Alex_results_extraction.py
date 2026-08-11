@@ -114,7 +114,7 @@ with open(out_path, 'w') as f:
         f.write('{},{:.6e},{},{:.6e},{:.6e}\n'.format(*r))
 
 print("Saved {} rows -> {}".format(len(rows), out_path))
-print("Add this path to id_map.csv 'csv_path' column for this participant.")
+print("Adding this path to id_map.csv 'csv_path' column for this participant...")
 
 # --- Element connectivity (topology), for spatial clustering analysis
 # (blob vs scattered strain distribution) downstream. One-time per
