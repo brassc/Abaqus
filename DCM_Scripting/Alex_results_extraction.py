@@ -132,4 +132,35 @@ with open(topology_path, 'w') as f:
             f.write('{},{}\n'.format(elem.label, nodes))
 print("Saved topology for {} elements -> {}".format(len(cord_element_labels), topology_path))
 
+# --- Auto-populate id_map.csv's 'csv_path' for the matching row (matched by
+# ODB_PATH), removing the manual copy-paste step. Uses the stdlib csv module
+# rather than pandas, since Abaqus's bundled Python isn't guaranteed to have
+# pandas installed. Only the matched row's csv_path is touched - every other
+# column/row is preserved exactly as read.
+if 'ID_MAP_PATH' not in dir():
+    ID_MAP_PATH = r'C:\Users\cmb247\repos\Abaqus\DCM_Scripting\id_map.csv'
+
+import csv
+
+with open(ID_MAP_PATH, 'rb') as f:
+    id_map_reader = csv.DictReader(f)
+    id_map_fieldnames = id_map_reader.fieldnames
+    id_map_rows = list(id_map_reader)
+
+id_map_matches = 0
+for id_map_row in id_map_rows:
+    if id_map_row.get('odb_path', '').strip() == ODB_PATH.strip():
+        id_map_row['csv_path'] = out_path
+        id_map_matches += 1
+
+if id_map_matches:
+    with open(ID_MAP_PATH, 'wb') as f:
+        id_map_writer = csv.DictWriter(f, fieldnames=id_map_fieldnames)
+        id_map_writer.writeheader()
+        id_map_writer.writerows(id_map_rows)
+    print("Updated csv_path in id_map.csv for {} matching row(s).".format(id_map_matches))
+else:
+    print("WARNING: ODB_PATH not found in id_map.csv 'odb_path' column - csv_path not auto-filled. "
+          "Add this row to id_map.csv first, or update it manually.")
+
 odb.close()
