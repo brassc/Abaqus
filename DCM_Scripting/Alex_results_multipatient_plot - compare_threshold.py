@@ -81,7 +81,8 @@ def make_comparison_plot(summary, thresholds, threshold_colors, threshold_labels
     # threshold's color; marker shape encodes loading condition, marker/line
     # color encodes threshold - following mps_group_plot.py's paired-point
     # style, extended to multiple thresholds at once.
-    participants = sorted(summary['participant'].unique(), key=lambda p: int(p[1:]))
+    participants = sorted(summary['participant'].unique(),
+                           key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
     x_pos = {p: i for i, p in enumerate(participants)}
 
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -98,20 +99,28 @@ def make_comparison_plot(summary, thresholds, threshold_colors, threshold_labels
             xs = [x_pos[p] for p in grp['participant']]
             ax.scatter(xs, grp[col], color=color, marker=marker, s=55, zorder=3)
 
-    # Two separate legends: color -> threshold, marker shape -> loading condition
+    # Single combined legend, top-left: Threshold entries, then Loading
+    # condition entries directly underneath (blank marker/label entries act
+    # as section headers) - keeps both groups together instead of split
+    # across corners.
     threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=threshold_colors[name],
                                  label=threshold_labels[name])
                           for name in thresholds]
     condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                           for cond, marker in CONDITION_MARKERS.items()]
+    blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
 
-    threshold_legend = ax.legend(handles=threshold_handles, loc='upper left', frameon=False, title='Threshold')
-    ax.add_artist(threshold_legend)
-    ax.legend(handles=condition_handles, loc='upper right', frameon=False, title='Loading condition')
+    all_handles = (
+        [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + threshold_handles +
+        [blank_handle] +
+        [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + condition_handles
+    )
+    fig.legend(handles=all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
     ax.set_xticks(range(len(participants)))
-    ax.set_xticklabels(participants)
-    ax.set_xlabel('Participant')
+    ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?'))
+                         for p in participants])
+    ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
     ax.set_ylabel('% cord volume above threshold')
     fig.tight_layout()
 
@@ -121,9 +130,28 @@ def make_comparison_plot(summary, thresholds, threshold_colors, threshold_labels
 
 id_map = pd.read_csv(ID_MAP_PATH, skipinitialspace=True)
 
-per_patient = {}   # (participant, loading_condition) -> reduced DataFrame
+# PRE-OP mJOA per participant - used below to order patients on every plot
+# by ascending pre-op mJOA (participant number as tie-break) and to label
+# each patient with it. Explicitly filtered to State == 'PreOp' rows only -
+# post-op mJOA can differ from pre-op for the same patient (e.g. N01-017:
+# preop 11, postop 10), so this must not just take whichever row comes
+# first in id_map.csv.
+preop_mjoa_by_participant = {}
+for _, row in id_map.iterrows():
+    if str(row.get('State', '')).strip().lower() != 'preop':
+        continue
+    p_label = 'P{}'.format(int(row['participant']))
+    preop_mjoa_by_participant[p_label] = row.get('mJOA', '')
+
+per_patient = {}   # (participant, loading_condition) -> reduced DataFrame, PreOp only
 missing = []
 for _, row in id_map.iterrows():
+    # PreOp only - without this filter, a PostOp row for the same
+    # (participant, condition) silently overwrites the PreOp entry below,
+    # since the dict key doesn't include state.
+    state = str(row.get('State', '')).strip().lower()
+    if state and state != 'preop':
+        continue
     csv_path = str(row.get('csv_path', '')).strip()
     condition = str(row.get('loading_condition', '')).strip()
     if not csv_path or csv_path.lower() == 'nan' or not os.path.isfile(csv_path):
@@ -167,7 +195,8 @@ print(summary.to_string(index=False))
 # color; marker shape encodes loading condition, marker/line color encodes
 # threshold - following mps_group_plot.py's paired-point style, extended to
 # three thresholds at once.
-participants = sorted(summary['participant'].unique(), key=lambda p: int(p[1:]))
+participants = sorted(summary['participant'].unique(),
+                       key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
 x_pos = {p: i for i, p in enumerate(participants)}
 
 fig, ax = plt.subplots(figsize=(7, 5))
@@ -184,24 +213,31 @@ for name in thresholds:
         xs = [x_pos[p] for p in grp['participant']]
         ax.scatter(xs, grp[col], color=color, marker=marker, s=55, zorder=3)
 
-# Two separate legends: color -> threshold, marker shape -> loading condition
+# Single combined legend, top-left: Threshold entries, then Loading
+# condition entries directly underneath (blank marker/label entries act as
+# section headers) - keeps both groups together instead of split across corners.
 threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=THRESHOLD_COLORS[name],
                              label='{} ({:.4f})'.format(name.upper(), thresholds[name]))
                       for name in thresholds]
 condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                       for cond, marker in CONDITION_MARKERS.items()]
+blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
 
-threshold_legend = ax.legend(handles=threshold_handles, loc='upper left', frameon=False, title='Threshold')
-ax.add_artist(threshold_legend)
-ax.legend(handles=condition_handles, loc='upper right', frameon=False, title='Loading condition')
+all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + threshold_handles +
+    [blank_handle] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + condition_handles
+)
+fig.legend(handles=all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
 ax.set_xticks(range(len(participants)))
-ax.set_xticklabels(participants)
-ax.set_xlabel('Participant')
+ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?'))
+                     for p in participants])
+ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
 ax.set_ylabel('% cord volume above threshold')
 fig.tight_layout()
 
-plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_compare_thresholds.pdf')
+plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_compare_thresholds_sortedbypreopmJOA.pdf')
 fig.savefig(plot_path, bbox_inches='tight')
 plt.close(fig)
 
@@ -218,7 +254,8 @@ manual_summary.to_csv(manual_summary_path, index=False)
 print(manual_summary.to_string(index=False))
 
 manual_labels = {name: '{:.2f}'.format(val) for name, val in MANUAL_THRESHOLDS.items()}
-manual_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_compare_thresholds_manual_thresholds.pdf')
+manual_plot_path = os.path.join(
+    OUT_DIR, 'multipatient_mps_plot_compare_thresholds_manual_thresholds_sortedbypreopmJOA.pdf')
 make_comparison_plot(manual_summary, MANUAL_THRESHOLDS, MANUAL_THRESHOLD_COLORS, manual_labels, manual_plot_path)
 
 print("Summary saved: {}".format(manual_summary_path))
@@ -310,6 +347,12 @@ blob_adjacency_cache = {}
 blob_missing_topology = []
 
 for _, row in id_map.iterrows():
+    # PreOp only - same reasoning as per_patient above: without this, a
+    # PostOp row for the same (participant, condition) could pair PostOp
+    # topology (different mesh) with PreOp field data for that key.
+    blob_state = str(row.get('State', '')).strip().lower()
+    if blob_state and blob_state != 'preop':
+        continue
     blob_participant = int(row['participant'])
     blob_condition = str(row.get('loading_condition', '')).strip()
     blob_csv_path = str(row.get('csv_path', '')).strip()
@@ -402,7 +445,7 @@ for (blob_threshold_name, blob_condition), blobs in sorted(blob_pooled.items()):
 blob_ax.set_xscale('log')
 blob_ax.set_xlim(blob_r_min, blob_r_max)
 blob_ax.set_ylim(0, 100)
-blob_ax.set_xlabel('Blob effective radius r (mm)') #equivalent sphere
+blob_ax.set_xlabel('MPS concentration effective radius r (mm)') #equivalent sphere
 blob_ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
 
 blob_threshold_handles = [Line2D([0], [0], color=MANUAL_THRESHOLD_COLORS[name], linestyle='-',
@@ -411,10 +454,13 @@ blob_threshold_handles = [Line2D([0], [0], color=MANUAL_THRESHOLD_COLORS[name], 
 blob_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
                            for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
 
-blob_threshold_legend = blob_ax.legend(handles=blob_threshold_handles, loc='upper left',
-                                        frameon=False, title='Threshold')
-blob_ax.add_artist(blob_threshold_legend)
-blob_ax.legend(handles=blob_condition_handles, loc='lower right', frameon=False, title='Loading condition')
+blob_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
+blob_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + blob_threshold_handles +
+    [blob_blank_handle] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + blob_condition_handles
+)
+blob_fig.legend(handles=blob_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
 blob_fig.tight_layout()
 blob_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution.pdf')
@@ -435,7 +481,13 @@ print("Plot saved: {}".format(blob_plot_path))
 # MANUAL_THRESHOLDS, BLOB_CONDITION_LINESTYLES, OUT_DIR, Line2D, pd, plt, os
 # already loaded/defined above - does not modify anything above this point.
 # ============================================================
-pp_patients_sorted = sorted(blob_df['participant'].unique(), key=lambda p: int(p[1:]))
+from matplotlib.ticker import LogLocator, NullFormatter
+
+PP_LOG_MAJOR_LOCATOR = LogLocator(base=10.0)
+PP_LOG_NULL_FORMATTER = NullFormatter()
+
+pp_patients_sorted = sorted(blob_df['participant'].unique(),
+                             key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
 pp_patient_colors = {p: plt.cm.tab10(i % 10) for i, p in enumerate(pp_patients_sorted)}
 
 # Common x/y range across ALL thresholds, so every panel is directly
@@ -474,12 +526,18 @@ def pp_plot_threshold(ax, threshold_name):
     ax.set_xscale('log')
     ax.set_xlim(pp_xlim)
     ax.set_ylim(pp_ylim)
+    # Major ticks only at clean powers of ten (10^-1, 10^0, 10^1, ...) - log
+    # axes otherwise default to also labeling minor ticks, which gets
+    # cluttered/unreadable once several decades are spanned.
+    ax.xaxis.set_major_locator(PP_LOG_MAJOR_LOCATOR)
+    ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
     ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), MANUAL_THRESHOLDS[threshold_name]))
-    ax.set_xlabel('Blob effective radius r (mm)')
+    ax.set_xlabel('MPS concentration effective radius r (mm)')
     ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
 
 
-pp_patient_handles = [Line2D([0], [0], color=pp_patient_colors[p], linestyle='-', label=p)
+pp_patient_handles = [Line2D([0], [0], color=pp_patient_colors[p], linestyle='-',
+                              label='{} (preop mJOA {})'.format(p, preop_mjoa_by_participant.get(p, '?')))
                        for p in pp_patients_sorted]
 pp_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
                          for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
@@ -489,14 +547,13 @@ for pp_threshold_name in MANUAL_THRESHOLDS:
     pp_fig, pp_ax = plt.subplots(figsize=(7, 5.5))
     pp_plot_threshold(pp_ax, pp_threshold_name)
 
-    pp_patient_legend = pp_ax.legend(handles=pp_patient_handles, loc='upper left', frameon=False,
-                                      title='Patient', fontsize=8)
-    pp_ax.add_artist(pp_patient_legend)
-    pp_ax.legend(handles=pp_condition_handles, loc='lower right', frameon=False, title='Loading condition')
+    pp_fig.legend(handles=pp_patient_handles + pp_condition_handles,
+                  loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
 
     pp_fig.tight_layout()
-    pp_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_{}.pdf'.format(
-        pp_threshold_name))
+    pp_plot_path = os.path.join(
+        OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_{}_sortedbypreopmJOA.pdf'.format(
+            pp_threshold_name))
     pp_fig.savefig(pp_plot_path, bbox_inches='tight')
     plt.close(pp_fig)
     print("Plot saved: {}".format(pp_plot_path))
@@ -509,7 +566,8 @@ for pp_ax_grid, pp_threshold_name in zip(pp_grid_axes.flat, MANUAL_THRESHOLDS):
 pp_grid_fig.legend(handles=pp_patient_handles + pp_condition_handles,
                     loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
 pp_grid_fig.tight_layout()
-pp_grid_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_grid.pdf')
+pp_grid_plot_path = os.path.join(
+    OUT_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_grid_sortedbypreopmJOA.pdf')
 pp_grid_fig.savefig(pp_grid_plot_path, bbox_inches='tight')
 plt.close(pp_grid_fig)
 print("Plot saved: {}".format(pp_grid_plot_path))
@@ -566,7 +624,8 @@ state_summary_path = os.path.join(
 state_summary.to_csv(state_summary_path, index=False)
 print(state_summary.to_string(index=False))
 
-state_participants = sorted(state_summary['participant'].unique(), key=lambda p: int(p[1:]))
+state_participants = sorted(state_summary['participant'].unique(),
+                             key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
 state_x_pos = {p: i for i, p in enumerate(state_participants)}
 
 # Plot only shows T0.10/T0.15 (summary CSV above still has all 4 thresholds
@@ -617,13 +676,17 @@ state_all_handles = (
 state_ax.legend(handles=state_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
 
 state_ax.set_xticks(range(len(state_participants)))
-state_ax.set_xticklabels(state_participants)
-state_ax.set_xlabel('Participant')
+state_ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?'))
+                           for p in state_participants])
+# Explicitly "pre-op" here since this plot shows PostOp points too, and
+# post-op mJOA can differ from pre-op for the same patient - the x-axis
+# ordering/label always uses pre-op mJOA regardless of a point's own state.
+state_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
 state_ax.set_ylabel('% cord volume above threshold')
 state_fig.tight_layout()
 
 state_plot_path = os.path.join(
-    OUT_DIR, 'multipatient_mps_plot_compare_thresholds_manual_thresholds_prepost.pdf')
+    OUT_DIR, 'multipatient_mps_plot_compare_thresholds_manual_thresholds_prepost_sortedbypreopmJOA.pdf')
 state_fig.savefig(state_plot_path, bbox_inches='tight')
 plt.close(state_fig)
 
