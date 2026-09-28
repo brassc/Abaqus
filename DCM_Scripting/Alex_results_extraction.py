@@ -141,8 +141,20 @@ if 'ID_MAP_PATH' not in dir():
     ID_MAP_PATH = r'C:\Users\cmb247\repos\Abaqus\DCM_Scripting\id_map.csv'
 
 import csv
+import sys
 
-with open(ID_MAP_PATH, 'rb') as f:
+# Abaqus 2022 and earlier use a Python 2.7 kernel, where csv needs files
+# opened in binary mode to avoid doubled line endings on Windows. Abaqus
+# 2025's kernel is Python 3.10, where csv needs TEXT mode instead (binary
+# mode hands it bytes, which csv.reader/writer reject) - newline='' is the
+# Python 3 equivalent trick for avoiding doubled line endings. Handling both
+# so this script works unmodified on either Abaqus version's kernel.
+if sys.version_info[0] >= 3:
+    id_map_read_mode, id_map_write_mode, id_map_open_kwargs = 'r', 'w', {'newline': ''}
+else:
+    id_map_read_mode, id_map_write_mode, id_map_open_kwargs = 'rb', 'wb', {}
+
+with open(ID_MAP_PATH, id_map_read_mode, **id_map_open_kwargs) as f:
     id_map_reader = csv.DictReader(f)
     id_map_fieldnames = id_map_reader.fieldnames
     id_map_rows = list(id_map_reader)
@@ -154,7 +166,7 @@ for id_map_row in id_map_rows:
         id_map_matches += 1
 
 if id_map_matches:
-    with open(ID_MAP_PATH, 'wb') as f:
+    with open(ID_MAP_PATH, id_map_write_mode, **id_map_open_kwargs) as f:
         id_map_writer = csv.DictWriter(f, fieldnames=id_map_fieldnames)
         id_map_writer.writeheader()
         id_map_writer.writerows(id_map_rows)
