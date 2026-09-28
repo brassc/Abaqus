@@ -129,8 +129,35 @@ def _resolve_nset_node(lines, nset_name):
     return instance_name, labels[0]
 
 
+def _part_block_ranges(lines):
+    """Return [(start, end), ...] line index ranges for every *Part ... *End Part block.
+    Used to exclude a Part's own internal node numbering when resolving a bare
+    assembly-level node (instance_name is None) - a Part's node 1 is a different
+    namespace from an assembly-level node 1."""
+    ranges = []
+    starts = [i for i, line in enumerate(lines) if re.match(r'\*Part\s*,', line.strip(), re.IGNORECASE)]
+    for s in starts:
+        for i in range(s + 1, len(lines)):
+            if re.match(r'\*End Part\b', lines[i].strip(), re.IGNORECASE):
+                ranges.append((s, i))
+                break
+    return ranges
+
+
 def _find_node_coords(lines, instance_name, node_label):
-    """Find (x, y, z) for node_label within the given instance's *Node block(s)."""
+    """Find (x, y, z) for node_label.
+
+    If instance_name is given, searches only that *Instance ... *End Instance block's
+    own *Node data (e.g. an orphan-mesh instance with its own embedded nodes).
+
+    If instance_name is None, the *Nset had no 'instance=' and wasn't inside any open
+    *Instance block, meaning it refers to a node defined directly in the *Assembly
+    block itself (a standalone reference point, not part of any instanced mesh). That
+    search must exclude every *Node block belonging to a *Part definition - those are
+    a completely separate numbering namespace and would otherwise be matched first
+    simply because Part definitions come first in the file, silently returning the
+    wrong node.
+    """
     if instance_name is not None:
         inst_start = None
         inst_re = re.compile(r'\*Instance\s*,.*\bname=' + re.escape(instance_name) + r'\b', re.IGNORECASE)
@@ -145,16 +172,18 @@ def _find_node_coords(lines, instance_name, node_label):
             if re.match(r'\*End Instance', lines[i].strip(), re.IGNORECASE):
                 inst_end = i
                 break
-        search_lines, offset = lines[inst_start:inst_end], inst_start
+        candidate_starts = [i for i in range(inst_start, inst_end)
+                             if re.match(r'\*Node\b', lines[i].strip(), re.IGNORECASE)]
     else:
-        search_lines, offset = lines, 0
+        part_ranges = _part_block_ranges(lines)
+        candidate_starts = [i for i, line in enumerate(lines)
+                             if re.match(r'\*Node\b', line.strip(), re.IGNORECASE)
+                             and not any(s <= i <= e for s, e in part_ranges)]
 
-    node_block_starts = [i for i, line in enumerate(search_lines)
-                          if re.match(r'\*Node\b', line.strip(), re.IGNORECASE)]
-    for nb in node_block_starts:
+    for nb in candidate_starts:
         i = nb + 1
-        while i < len(search_lines) and not search_lines[i].lstrip().startswith('*'):
-            parts = [p.strip() for p in search_lines[i].strip().rstrip(',').split(',') if p.strip()]
+        while i < len(lines) and not lines[i].lstrip().startswith('*'):
+            parts = [p.strip() for p in lines[i].strip().rstrip(',').split(',') if p.strip()]
             if parts and int(parts[0]) == node_label:
                 coords = [float(x) for x in parts[1:4]]
                 while len(coords) < 3:
@@ -389,13 +418,13 @@ def add_oscillation_step(inp_path):
     out_path = _output_path(inp_path)
     if os.path.abspath(out_path) == os.path.abspath(inp_path):
         raise RuntimeError("Refusing to write: output path resolved to the source file itself ({0})".format(inp_path))
-    if os.path.exists(out_path):
-        raise RuntimeError("Refusing to overwrite existing file: {0}".format(out_path))
 
+    # out_path/out_dir are always this script's own generated '..._removed_osc' output
+    # (never the source .inp, guarded above), so overwriting them to regenerate with a
+    # fixed script version is fine - the source .inp is still never touched.
     out_dir = os.path.dirname(out_path)
-    if os.path.exists(out_dir):
-        raise RuntimeError("Refusing to write into an existing directory: {0} (expected a new job folder)".format(out_dir))
-    os.makedirs(out_dir)
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
 
     with open(out_path, 'w') as f:
         f.writelines(out_lines)
