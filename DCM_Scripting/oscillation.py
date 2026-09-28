@@ -66,7 +66,8 @@ ID_MAP_PATH = r'C:\Users\cmb247\repos\Abaqus\DCM_Scripting\id_map.csv'
 # points and direction vector against.
 #
 # >>> SET INP_PATH = None BELOW TO RUN THE FULL id_map.csv BATCH INSTEAD <<<
-INP_PATH = r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.inp'
+INP_PATH = None
+#r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.inp'
 
 
 # ============================================================
@@ -165,7 +166,10 @@ def _find_node_coords(lines, instance_name, node_label):
 
 
 def _detect_rps(lines):
-    """Auto-detect the C2-top and C7-base coupling reference points via *Coupling lines."""
+    """Auto-detect the upper ('cN-top') and lower ('cN-base') coupling reference points
+    via *Coupling lines. Matches any vertebra number, not just C2/C7, since the modeled
+    segment's extent (and therefore which vertebra sits at the top/base) varies by
+    patient and state - e.g. some PostOp models only extend down to C3, not C7."""
     coupling_re = re.compile(r'\*Coupling\s*,.*ref node=([^\s,]+)\s*,\s*surface=([^\s,]+)', re.IGNORECASE)
     upper, lower = None, None
     for line in lines:
@@ -173,16 +177,16 @@ def _detect_rps(lines):
         if not m:
             continue
         ref_node, surface = m.group(1), m.group(2).lower()
-        if 'c2' in surface and 'top' in surface:
+        if re.search(r'c\d+-top', surface):
             if upper is not None:
-                raise RuntimeError("Multiple candidate C2-top coupling reference points found")
+                raise RuntimeError("Multiple candidate '-top' coupling reference points found")
             upper = ref_node
-        elif 'c7' in surface and 'base' in surface:
+        elif re.search(r'c\d+-base', surface):
             if lower is not None:
-                raise RuntimeError("Multiple candidate C7-base coupling reference points found")
+                raise RuntimeError("Multiple candidate '-base' coupling reference points found")
             lower = ref_node
     if upper is None or lower is None:
-        raise RuntimeError("Could not auto-detect both C2-top and C7-base coupling reference points "
+        raise RuntimeError("Could not auto-detect both 'cN-top' and 'cN-base' coupling reference points "
                             "(found upper={0}, lower={1})".format(upper, lower))
     return upper, lower
 
