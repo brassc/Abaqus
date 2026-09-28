@@ -57,7 +57,7 @@ execfile('sets_scaled_inpmod_gm_script.py')
 If `CORD_SET_NAME` is not set, all nodes in `INSTANCE_NAME` are classified.
 
 **Point placement guidance:** upper, center, and lower points define the axis vector (`normalize(upper - lower)`). Place all three on the **same face and same mesh layer** of the cord surface. Mixing mesh layers on the same face introduces an artificial tilt into the axis vector, creating non-uniform temperature across the cord cross-section. Ensure `upper_cord_sag_dist` > `indent_cord_sag_dist` — swapping these produces negative field values.
-
+fff
 For overlap detection behaviour, output file naming, and summary file format, see the `sets_scaled_inpmod_overlap.py` section below — `sets_scaled_inpmod_gm_script.py` uses the same three-pass approach with identical output.
 
 ---
@@ -328,6 +328,62 @@ For each band, the script creates:
 Naming convention: `predefinedfield-<site_index>-fieldband<band_number>`
 
 `sets_scaled_inpmod_gm_script.py` and `sets_scaled_inpmod_overlap.py` both write a `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See the [Output files](#output-files) section above for naming details.
+
+---
+
+## Cord Oscillation Modeling: oscillation.py
+
+Models cord motion driven by CSF (cerebrospinal fluid) pulsation, as an alternative to the flexion/extension loading used elsewhere in this README. Rather than applying a moment to bend the spine, it moves everything *except* the cord back and forth along the spine's own axis defined by reference points at top and bottom of spine, leaving the cord itself stationary. 
+
+It does this by taking a completed job's `.inp` (which normally has `Step-1` for compression-site preload, then `Step-2` for the flexion/extension moment) and producing a new `.inp` where `Step-2` is dropped entirely and replaced with a `Step-3` that oscillates the vertebral column instead. 
+
+### How it works
+
+Every patient's `.inp` has two reference points (RPs) coupled to the top and bottom of the modeled vertebral segment — one to the C2 (or whichever level sits at the top) surface, one to the C7 (or whichever level sits at the bottom) surface. The lower RP is the one held fixed for the preload step and is kinematically coupled to the whole vertebral/ligament surface, so driving the lower RP moves the bony/ligamentous anatomy while the cord, which isn't tied to that coupling, stays where it is.
+
+The script finds these two RPs automatically by scanning the `.inp` for `*Coupling` lines and matching node set names that look like `c<number>-top` / `c<number>-base` (e.g. `c2-top`, `c3-base {typo}`, `c7-base`). The exact `*Nset` name for each RP (`m_Set-3`, `m_Set-4`, `m_Set-5`...) also varies patient to patient, so it's never hardcoded.
+
+The oscillation direction is the 3D vector between these two RPs' coordinates (upper minus lower) computed patient-by-patient from `.inp`. This is necessary because not every patient's model is oriented identically.
+
+**RP scripting note**: an RP's coordinates can live in two different places in the `.inp`, and getting this wrong produces a plausible-looking but wrong answer rather than an error (oscillation mainly in $x$ direction rather than majority $z$). Some patients have their RPs inside a small, dedicated reference-point instance (their own tiny `*Instance` block). However, most of cohort have them as bare nodes sitting directly in the `*Assembly` block, with no `instance=` on their `*Nset`. For that second case, the search has to specifically exclude every `*Node` block that belongs to a `*Part` definition, because a `*Part`'s own internal node numbering restarts at 1 too, and a naive whole-file search would return the main anatomy mesh's node 1 instead of the real upper RP.
+
+### Oscillation profile and magnitude
+
+The time-varying displacement (a roughly cardiac-cycle-shaped curve, `Amp-3-osc`) and its 0.76mm peak magnitude are copied from Sam Schaefer's work, which itself uses the oscillatory cervical cord motion profile described by Mikulis et al. [1,2]. The magnitude is decomposed into three components along the computed direction vector (`dx, dy, dz`) and written as three `*Boundary` lines under one shared `*Boundary, ..., amplitude=Amp-3-osc` block, so all three move together in time and the net motion stays purely along that one direction, rather than tracing out some other path.
+
+### Usage
+
+Pure text processing — no Abaqus API is used, so it runs equally well via `abaqus python`, `execfile()` in the CAE kernel, or a plain Python interpreter.
+
+```python
+# Single file:
+INP_PATH = r'D:\path\to\Job-xxx.inp'
+execfile('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting\\oscillation.py')
+
+# Batch (INP_PATH = None): every id_map.csv row where loading_condition == 'Flexion'
+INP_PATH = None
+execfile('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting\\oscillation.py')
+```
+
+### Output naming
+
+The source `.inp` is only ever opened read-only — it's never modified — and the result is written into a new, renumbered sibling job folder, never into an existing one. The job number's leading digit is replaced with `3` (so it's visually distinct from the original run), and `removed`/`osc` markers are added: `removed` sits right before the compression-site suffix (`_0pt30_Site1_Site2...`) if the filename has one, or at the end if it doesn't (e.g. most PostOp jobs, which have no compression-site fields); `osc` is always appended at the very end.
+
+```
+Job-020-N01-011-PreOp-BC0pt35wEVOL/
+  Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.inp
+→
+Job-320-N01-011-PreOp-BC0pt35wEVOL_removed_osc/
+  Job-320-N01-011-PreOp-BC0pt35wEVOL_removed_0pt30_Site1_Site2_Site3_Site4_osc.inp
+```
+
+Re-running the script overwrites its *own* previously-generated output (so a bug fix can regenerate everyone's files in one go), but it will never overwrite the source `.inp` — that check is unconditional, not something a flag can bypass.
+
+### References
+
+[1] Mikulis DJ, Wood ML, Zerdoner OAM, Poncelet BP. Oscillatory motion of the normal cervical spinal cord. Radiology. 1994 Jul;192(1):117–121. doi: 10.1148/radiology.192.1.8208922. PMID: 8208922.
+
+[2] Schaefer SD, Davies BM, Newcombe VFJ, Sutcliffe MPF. Could spinal cord oscillation contribute to spinal cord injury in degenerative cervical myelopathy? Brain and Spine. 2023;3:101743. doi: 10.1016/j.bas.2023.101743. PMID: 37383476; PMCID: PMC10293319.
 
 ---
 

@@ -39,7 +39,22 @@ import sys
 # ============================================================
 PEAK_OSC_MM = 0.76
 
-# Copied verbatim from Job-202-N01-011-PreOp-oscnomvt.inp
+# Step-3's *Static max-increment cap. Must not exceed the amplitude table's own
+# sampling interval (0.02, see AMP_3_OSC_LINES below), or Abaqus could take a single
+# increment large enough to skip over a peak/trough in the table entirely.
+STEP3_MAX_INCREMENT = 0.02
+
+# Copied verbatim from Job-202-N01-011-PreOp-oscnomvt.inp. Magnitude and
+# table are from Sam Schaefer's work, which itself uses the oscillatory
+# cervical cord motion profile described by Mikulis et al. [1,2]
+#
+# [1] Mikulis DJ, Wood ML, Zerdoner OAM, Poncelet BP. Oscillatory motion of
+#     the normal cervical spinal cord. Radiology. 1994 Jul;192(1):117-121.
+#     doi: 10.1148/radiology.192.1.8208922. PMID: 8208922.
+# [2] Schaefer SD, Davies BM, Newcombe VFJ, Sutcliffe MPF. Could spinal cord
+#     oscillation contribute to spinal cord injury in degenerative cervical
+#     myelopathy? Brain and Spine. 2023;3:101743.
+#     doi: 10.1016/j.bas.2023.101743. PMID: 37383476; PMCID: PMC10293319.
 AMP_3_OSC_LINES = [
     "             0.,              0.,            0.02,         0.25723,            0.04,         0.46312,            0.06,          0.6143\n",
     "           0.08,         0.71078,             0.1,         0.75546,            0.12,         0.75357,            0.14,         0.71204\n",
@@ -196,9 +211,11 @@ def _find_node_coords(lines, instance_name, node_label):
 
 def _detect_rps(lines):
     """Auto-detect the upper ('cN-top') and lower ('cN-base') coupling reference points
-    via *Coupling lines. Matches any vertebra number, not just C2/C7, since the modeled
-    segment's extent (and therefore which vertebra sits at the top/base) varies by
-    patient and state - e.g. some PostOp models only extend down to C3, not C7."""
+    via *Coupling lines. Every model spans C2 to C7, so the surface should always be
+    named 'c2-top'/'c7-base' - but at least two source files mislabel the base surface
+    as 'c3-base' (a naming typo upstream, not a real anatomical difference). Matching
+    any vertebra number rather than hardcoding C2/C7 means the detection still works
+    despite that typo, without needing to special-case it."""
     coupling_re = re.compile(r'\*Coupling\s*,.*ref node=([^\s,]+)\s*,\s*surface=([^\s,]+)', re.IGNORECASE)
     upper, lower = None, None
     for line in lines:
@@ -363,11 +380,20 @@ def add_oscillation_step(inp_path):
 
     _check_boundary_conditions(lines, step1_span, rp_lower)
 
-    # Reuse Step-1's *Static control line
+    # Reuse Step-1's *Static solver-control keyword line, but give Step-3 its own
+    # max-increment value: the oscillation amplitude table samples every 0.02 (in
+    # normalized step time), so the max increment must not exceed that, or Abaqus
+    # could legitimately take a single increment large enough to skip a peak/trough
+    # in the table entirely rather than resolving the oscillation shape.
     static_keyword_line = lines[step1_start + 1]
-    static_data_line = lines[step1_start + 2]
     if not static_keyword_line.strip().startswith('*Static'):
         raise RuntimeError("Expected '*Static' as the line following Step-1's '*Step' keyword")
+    step1_static_data = [p.strip() for p in lines[step1_start + 2].strip().rstrip(',').split(',')]
+    if len(step1_static_data) != 4:
+        raise RuntimeError("Expected Step-1's *Static data line to have 4 values "
+                            "(initial, total, min, max increment), found {0}".format(step1_static_data))
+    initial_inc, total_time, min_inc, _ = step1_static_data
+    static_data_line = "{0}, {1}, {2}, {3}\n".format(initial_inc, total_time, min_inc, STEP3_MAX_INCREMENT)
 
     # Reuse Step-1's output-request block, including its '** OUTPUT REQUESTS' comment
     # header (from that header, or '*Restart' itself if there's no header, through to
