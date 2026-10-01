@@ -861,3 +861,82 @@ plt.close(delta_fig)
 
 print("Summary saved: {}".format(delta_summary_path))
 print("Plot saved: {}".format(delta_plot_path))
+
+# ============================================================
+# Blob adjacency CACHE (PreOp-NoPreload vs PostOp) - not a plot itself.
+# Parsing each job's '_topology.csv' and finding shared-node element pairs
+# (load_adjacency_edges) is the slow part of blob analysis and is entirely
+# threshold-independent, so it's computed ONCE here and written to a CSV
+# cache. plot_prepost_blob_distribution.py (a standalone script, same
+# fast-iteration pattern as plot_prepost_sortedbymjoachange.py) reads this
+# cache plus the existing cache_prepost_sortedbymjoachange_{FRAME_MODE}.csv
+# to do the actual blob-finding and plotting in seconds, without re-running
+# this whole pipeline or re-parsing topology every time thresholds/colors
+# change.
+#
+# Needs a SEPARATE adjacency cache keyed by (participant, condition, state)
+# - PreOp-NoPreload and PostOp are different jobs/meshes for the same
+# patient, so their topology must be loaded and kept separately (the
+# existing blob_adjacency_cache above is keyed (participant, condition)
+# only, PreOp-specific).
+#
+# Reuses id_map, state_per_patient (built for the Fifth/Sixth plots -
+# already covers every State including PreOp-NoPreload/PostOp, already
+# Flexion/Extension only), load_adjacency_edges, DELTA_TOP_STATE/
+# BOTTOM_STATE, OUT_DIR, pd, os already loaded/defined above - does not
+# modify anything above this point.
+# ============================================================
+# state_per_patient is keyed by the ORIGINAL-case State string from id_map.csv
+# (its own builder: state_state = str(row.get('State', '')).strip() or 'PreOp')
+# - ppblob_key below matches that convention directly (no lowercasing), so
+# it both indexes state_per_patient correctly AND keeps this cache's 'state'
+# column consistent with cache_prepost_sortedbymjoachange_{FRAME_MODE}.csv's
+# own 'state' column (also original-case) that the standalone script reads
+# alongside it.
+ppblob_adjacency_cache = {}
+ppblob_missing_topology = []
+
+for _, row in id_map.iterrows():
+    ppblob_state = str(row.get('State', '')).strip() or 'PreOp'
+    if ppblob_state.strip().lower() not in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE):
+        continue
+    ppblob_condition = str(row.get('loading_condition', '')).strip()
+    if ppblob_condition.strip().lower() not in ('flexion', 'extension'):
+        continue
+    ppblob_participant = int(row['participant'])
+    ppblob_csv_path = str(row.get('csv_path', '')).strip()
+    ppblob_key = (ppblob_participant, ppblob_condition, ppblob_state)
+    if ppblob_key not in state_per_patient or not ppblob_csv_path or ppblob_csv_path.lower() == 'nan':
+        continue
+    ppblob_topology_path = ppblob_csv_path.replace('_mps.csv', '_topology.csv')
+    if not os.path.isfile(ppblob_topology_path):
+        ppblob_missing_topology.append(ppblob_key)
+        continue
+    ppblob_adjacency_cache[ppblob_key] = load_adjacency_edges(ppblob_topology_path)
+
+if ppblob_missing_topology:
+    print("Skipping {} patient/condition/state combo(s) missing '_topology.csv' for PreOp-NoPreload/PostOp "
+          "blob analysis:".format(len(ppblob_missing_topology)))
+    for ppblob_participant, ppblob_condition, ppblob_state in ppblob_missing_topology:
+        print("  P{} ({}, {})".format(ppblob_participant, ppblob_condition, ppblob_state))
+
+
+# Flatten (participant, condition, state) -> [(elem_a, elem_b), ...] into a
+# CSV: one row per adjacency edge. Written once here; read back fast by
+# plot_prepost_blob_distribution.py on every subsequent run.
+ppblob_adjacency_rows = []
+for (ppblob_cache_p, ppblob_cache_c, ppblob_cache_s), ppblob_cache_edges in ppblob_adjacency_cache.items():
+    for ppblob_elem_a, ppblob_elem_b in ppblob_cache_edges:
+        ppblob_adjacency_rows.append({
+            'participant':       ppblob_cache_p,
+            'loading_condition': ppblob_cache_c,
+            'state':             ppblob_cache_s,
+            'elem_a':            ppblob_elem_a,
+            'elem_b':            ppblob_elem_b,
+        })
+
+ppblob_adjacency_cache_path = os.path.join(
+    OUT_DIR, 'cache_prepost_blob_adjacency_{}.csv'.format(FRAME_MODE))
+pd.DataFrame(ppblob_adjacency_rows).to_csv(ppblob_adjacency_cache_path, index=False)
+print("Cached blob adjacency edges for standalone replotting: {} ({} edges, {} (participant, condition, state) "
+      "combos)".format(ppblob_adjacency_cache_path, len(ppblob_adjacency_rows), len(ppblob_adjacency_cache)))
