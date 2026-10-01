@@ -166,7 +166,9 @@ delta_fig.legend(handles=delta_all_handles, loc='center left', bbox_to_anchor=(1
 delta_ax_preop.tick_params(labelbottom=False)
 delta_ax_postop.set_xticks(range(len(delta_participants)))
 delta_ax_postop.set_xticklabels(
-    ['{}\n(delta {:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
+    ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
+delta_ax_postop.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                          xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
 delta_ax_postop.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
 delta_fig.suptitle('% cord volume above MPS threshold, PreOp (no preload) vs PostOp')
 delta_fig.tight_layout()
@@ -177,3 +179,192 @@ plt.close(delta_fig)
 
 print("Summary saved: {}".format(delta_summary_path))
 print("Plot saved: {}".format(delta_plot_path))
+
+# ============================================================
+# Second plot: delta (PostOp - PreOp no preload) % cord volume above
+# threshold, split into two rows by operation type - Fusion (top) vs
+# Decompression-only (bottom). Reuses state_per_patient, id_map,
+# mjoa_delta_by_participant, DELTA_THRESHOLDS/COLORS, CONDITION_MARKERS,
+# DELTA_FUSION_PARTICIPANTS, OUT_DIR, Line2D, pd, plt, os,
+# pct_volume_above already loaded/defined above.
+# ============================================================
+OP_GROUP_TITLES = {'fusion': 'Laminectomy with Fusion', 'decompression': 'Laminectomy Only'}
+
+op_delta_records = []
+op_participants_present = sorted(set(p for (p, _, _) in state_per_patient))
+for op_participant in op_participants_present:
+    op_p_label = 'P{}'.format(op_participant)
+    if op_p_label not in mjoa_delta_by_participant:
+        continue
+    op_group = 'fusion' if op_p_label in DELTA_FUSION_PARTICIPANTS else 'decompression'
+    for op_condition in ('Flexion', 'Extension'):
+        op_pre_df = state_per_patient.get((op_participant, op_condition, 'PreOp-NoPreload'))
+        op_post_df = state_per_patient.get((op_participant, op_condition, 'PostOp'))
+        if op_pre_df is None or op_post_df is None:
+            continue
+        for op_threshold_name, op_threshold_val in DELTA_THRESHOLDS.items():
+            op_pct_pre = pct_volume_above(op_pre_df, op_threshold_val)
+            op_pct_post = pct_volume_above(op_post_df, op_threshold_val)
+            op_delta_records.append({
+                'participant': op_p_label,
+                'group': op_group,
+                'loading_condition': op_condition,
+                'threshold': op_threshold_name,
+                'pct_above_pre': op_pct_pre,
+                'pct_above_post': op_pct_post,
+                'delta': op_pct_post - op_pct_pre,
+            })
+op_delta_summary = pd.DataFrame(op_delta_records)
+
+op_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_delta_by_operation_2row.csv')
+op_delta_summary.to_csv(op_summary_path, index=False)
+print(op_delta_summary.to_string(index=False))
+
+# Numeric evaluation aid: mean/median delta per threshold per group, to help
+# judge which threshold best separates Fusion from Decompression-only.
+print()
+print("Mean/median delta by threshold and group:")
+op_agg = op_delta_summary.groupby(['threshold', 'group'])['delta'].agg(['mean', 'median']).reset_index()
+print(op_agg.to_string(index=False))
+
+# Each row gets its own x-ordering (ascending by mJOA change, tie-broken by
+# participant number) since Fusion/Decompression are disjoint patient sets.
+op_group_participants = {}
+op_group_x_pos = {}
+for op_group_name in ('fusion', 'decompression'):
+    op_grp_participants = sorted(
+        (p for p in mjoa_delta_by_participant
+         if p in op_delta_summary.loc[op_delta_summary['group'] == op_group_name, 'participant'].unique()),
+        key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+    op_group_participants[op_group_name] = op_grp_participants
+    op_group_x_pos[op_group_name] = {p: i for i, p in enumerate(op_grp_participants)}
+
+# Shared y-limits across both rows (symmetric padding around the combined
+# min/max delta) so Fusion and Decompression are directly comparable.
+op_delta_min = op_delta_summary['delta'].min()
+op_delta_max = op_delta_summary['delta'].max()
+op_delta_pad = 0.1 * max(abs(op_delta_min), abs(op_delta_max), 1e-9)
+op_delta_ylim = (op_delta_min - op_delta_pad, op_delta_max + op_delta_pad)
+
+op_fig, (op_ax_fusion, op_ax_decomp) = plt.subplots(2, 1, figsize=(9, 8))
+op_ax_by_group = {'fusion': op_ax_fusion, 'decompression': op_ax_decomp}
+
+for op_group_name, op_ax in op_ax_by_group.items():
+    op_x_pos = op_group_x_pos[op_group_name]
+    op_group_sub = op_delta_summary[op_delta_summary['group'] == op_group_name]
+    for op_threshold_name in DELTA_THRESHOLDS:
+        op_threshold_sub = op_group_sub[op_group_sub['threshold'] == op_threshold_name]
+        op_color = DELTA_THRESHOLD_COLORS[op_threshold_name]
+        for op_participant_label, op_grp in op_threshold_sub.groupby('participant'):
+            if len(op_grp) == 2:
+                op_xp = op_x_pos[op_participant_label]
+                op_ax.vlines(op_xp, op_grp['delta'].min(), op_grp['delta'].max(),
+                             color=op_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for op_condition_name, op_grp in op_threshold_sub.groupby('loading_condition'):
+            op_marker = CONDITION_MARKERS.get(op_condition_name.strip().lower(), 'o')
+            op_xs = [op_x_pos[p] for p in op_grp['participant']]
+            op_ax.scatter(op_xs, op_grp['delta'], color=op_color, marker=op_marker, s=55, zorder=3)
+    op_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
+    op_ax.set_ylim(op_delta_ylim)
+    op_ax.set_ylabel('Δ % cord volume\nabove threshold\n(PostOp - PreOp)')
+    op_ax.set_title(OP_GROUP_TITLES[op_group_name])
+    op_ax.set_xticks(range(len(op_group_participants[op_group_name])))
+    op_ax.set_xticklabels(
+        ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p])
+         for p in op_group_participants[op_group_name]])
+    op_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                    xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+
+op_ax_decomp.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+
+op_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
+                                label='{:.2f}'.format(val))
+                         for name, val in DELTA_THRESHOLDS.items()]
+op_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                         for cond, marker in CONDITION_MARKERS.items()]
+op_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+op_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + op_threshold_handles +
+    [op_blank_handle] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + op_condition_handles
+)
+op_fig.legend(handles=op_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+
+op_fig.suptitle('Δ % cord volume above MPS threshold (PostOp - PreOp no preload), by operation type')
+op_fig.tight_layout()
+
+op_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_delta_by_operation_2row.pdf')
+op_fig.savefig(op_plot_path, bbox_inches='tight')
+plt.close(op_fig)
+
+print()
+print("Summary saved: {}".format(op_summary_path))
+print("Plot saved: {}".format(op_plot_path))
+
+# ============================================================
+# Third plot: same delta (PostOp - PreOp no preload) data as the second
+# plot above, but as a single combined panel - all 12 patients in one row
+# ordered by mJOA change, with the 4 Fusion patients' x-region shaded
+# (same orange/axvspan convention as the first plot on this page). Built
+# to compare directly against the 2-row version above and pick whichever
+# reads better. Reuses op_delta_summary, mjoa_delta_by_participant,
+# DELTA_THRESHOLDS/COLORS, CONDITION_MARKERS, DELTA_FUSION_PARTICIPANTS,
+# OUT_DIR, Line2D, Patch, pd, plt, os already loaded/defined above.
+# ============================================================
+op_combined_participants = sorted(mjoa_delta_by_participant.keys(),
+                                   key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+op_combined_x_pos = {p: i for i, p in enumerate(op_combined_participants)}
+
+op_combined_fig, op_combined_ax = plt.subplots(figsize=(9, 5.5))
+
+for op_threshold_name in DELTA_THRESHOLDS:
+    op_threshold_sub = op_delta_summary[op_delta_summary['threshold'] == op_threshold_name]
+    op_color = DELTA_THRESHOLD_COLORS[op_threshold_name]
+    for op_participant_label, op_grp in op_threshold_sub.groupby('participant'):
+        if len(op_grp) == 2:
+            op_xp = op_combined_x_pos[op_participant_label]
+            op_combined_ax.vlines(op_xp, op_grp['delta'].min(), op_grp['delta'].max(),
+                                   color=op_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for op_condition_name, op_grp in op_threshold_sub.groupby('loading_condition'):
+        op_marker = CONDITION_MARKERS.get(op_condition_name.strip().lower(), 'o')
+        op_xs = [op_combined_x_pos[p] for p in op_grp['participant']]
+        op_combined_ax.scatter(op_xs, op_grp['delta'], color=op_color, marker=op_marker, s=55, zorder=3)
+
+for op_fusion_p in DELTA_FUSION_PARTICIPANTS:
+    if op_fusion_p in op_combined_x_pos:
+        op_xp = op_combined_x_pos[op_fusion_p]
+        op_combined_ax.axvspan(op_xp - 0.5, op_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+
+op_combined_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
+op_combined_ax.set_ylim(op_delta_ylim)
+op_combined_ax.set_ylabel('Δ % cord volume above threshold\n(PostOp - PreOp)')
+op_combined_ax.set_xticks(range(len(op_combined_participants)))
+op_combined_ax.set_xticklabels(
+    ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in op_combined_participants])
+op_combined_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                         xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+op_combined_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+
+op_combined_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion')]
+op_combined_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + op_threshold_handles +
+    [op_blank_handle] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + op_condition_handles +
+    [op_blank_handle] + op_combined_fusion_handle
+)
+op_combined_fig.legend(handles=op_combined_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+
+op_combined_fig.suptitle('Δ % cord volume above MPS threshold (PostOp - PreOp no preload), by operation type')
+op_combined_fig.tight_layout()
+
+op_combined_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_delta_by_operation_combined.pdf')
+op_combined_fig.savefig(op_combined_plot_path, bbox_inches='tight')
+plt.close(op_combined_fig)
+
+op_combined_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_delta_by_operation_combined.csv')
+op_delta_summary.to_csv(op_combined_summary_path, index=False)
+
+print()
+print("Summary saved: {}".format(op_combined_summary_path))
+print("Plot saved: {}".format(op_combined_plot_path))
