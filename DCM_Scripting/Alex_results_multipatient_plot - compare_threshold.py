@@ -848,7 +848,9 @@ delta_fig.legend(handles=delta_all_handles, loc='center left', bbox_to_anchor=(1
 delta_ax_preop.tick_params(labelbottom=False)
 delta_ax_postop.set_xticks(range(len(delta_participants)))
 delta_ax_postop.set_xticklabels(
-    ['{}\n(delta {:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
+    ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
+delta_ax_postop.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                          xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
 delta_ax_postop.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
 delta_fig.suptitle('% cord volume above MPS threshold, PreOp (no preload) vs PostOp')
 delta_fig.tight_layout()
