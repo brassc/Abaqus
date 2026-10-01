@@ -594,8 +594,15 @@ STATE_FILLED = {'preop': True, 'postop': False}   # solid marker vs hollow marke
 state_per_patient = {}   # (participant, loading_condition, state) -> reduced DataFrame, ALL states
 state_missing = []
 for _, row in id_map.iterrows():
-    state_csv_path = str(row.get('csv_path', '')).strip()
     state_condition = str(row.get('loading_condition', '')).strip()
+    if state_condition.strip().lower() not in ('flexion', 'extension'):
+        # Excludes id_map's 'Oscillation' rows - this dict feeds both the
+        # fifth and sixth plots below, neither of which defines a
+        # marker/style for a third loading condition, so Oscillation rows
+        # would otherwise silently plot with the scatter default marker 'o'
+        # mixed in among the Flexion/Extension points.
+        continue
+    state_csv_path = str(row.get('csv_path', '')).strip()
     state_state = str(row.get('State', '')).strip() or 'PreOp'
     if not state_csv_path or state_csv_path.lower() == 'nan' or not os.path.isfile(state_csv_path):
         state_missing.append((int(row['participant']), state_condition, state_state))
@@ -694,24 +701,37 @@ print("Summary saved: {}".format(state_summary_path))
 print("Plot saved: {}".format(state_plot_path))
 
 # ============================================================
-# Sixth plot: PreOp vs PostOp, 0.05 threshold only, 2 rows x 1 column (top =
-# PreOp, bottom = PostOp, sharing the same x order) - patients ordered by
-# CHANGE in mJOA (postop - preop), ascending (most worsened on the left,
-# most improved on the right), rather than raw pre-op mJOA. Only patients
-# with BOTH a pre-op and post-op mJOA value can have a delta, so anyone
-# missing either is left out of this plot only.
+# Sixth plot: PreOp-NoPreload vs PostOp, 5 low manual thresholds
+# (0.01/0.02/0.03/0.04/0.05), 2 rows x 1 column (top = PreOp WITHOUT the
+# simulated preload step, bottom = PostOp, sharing the same x order) -
+# patients ordered by CHANGE in mJOA (postop - preop), ascending (most
+# worsened on the left, most improved on the right), rather than raw pre-op
+# mJOA. mJOA itself is a clinical property of the patient, not of which
+# simulation variant is plotted, so the delta/ordering still comes from the
+# regular PreOp/PostOp mJOA values regardless of the top row using the
+# NoPreload model. Only patients with BOTH a pre-op and post-op mJOA value
+# can have a delta, so anyone missing either is left out of this plot only.
 #
-# Reuses state_per_patient (built for the fifth plot - has both PreOp and
-# PostOp data), id_map, preop_mjoa_by_participant, MANUAL_THRESHOLDS,
-# MANUAL_THRESHOLD_COLORS, CONDITION_MARKERS, OUT_DIR, Line2D, pd, plt, os,
+# Reuses state_per_patient (built for the fifth plot - already restricted to
+# Flexion/Extension, all States including PreOp-NoPreload), id_map,
+# preop_mjoa_by_participant, CONDITION_MARKERS, OUT_DIR, Line2D, pd, plt, os,
 # pct_volume_above already loaded/defined above - does not modify anything
 # above this point.
 # ============================================================
 from matplotlib.patches import Patch
 
-DELTA_THRESHOLD_NAME = 't0p05'
-DELTA_THRESHOLD_VAL = MANUAL_THRESHOLDS[DELTA_THRESHOLD_NAME]
-DELTA_THRESHOLD_COLOR = MANUAL_THRESHOLD_COLORS[DELTA_THRESHOLD_NAME]
+DELTA_THRESHOLDS = {'t0p01': 0.01, 't0p02': 0.02, 't0p03': 0.03}#, 't0p04': 0.04, 't0p05': 0.05}
+DELTA_THRESHOLD_COLORS = {
+    't0p01': '#2a78d6',   # blue
+    't0p02': '#eb6834',   # orange
+    't0p03': '#1baf7a',   # aqua
+    #'t0p04': '#1c5cab',
+    #'t0p05': '#104281',
+}
+
+DELTA_TOP_STATE = 'preop-nopreload'     # top row: PreOp WITHOUT simulated preload
+DELTA_BOTTOM_STATE = 'postop'           # bottom row: PostOp (unchanged)
+DELTA_STATE_TITLES = {DELTA_TOP_STATE: 'PreOp (no preload)', DELTA_BOTTOM_STATE: 'PostOp'}
 
 postop_mjoa_by_participant = {}
 for _, row in id_map.iterrows():
@@ -730,17 +750,40 @@ for p_label, preop_val in preop_mjoa_by_participant.items():
     except (TypeError, ValueError):
         continue
 
+# Cache the per-element (mps, volume) data this plot depends on - the
+# threshold-independent, expensive-to-recompute part (reading + reducing
+# every patient's raw per-frame CSV) - so plot_prepost_sortedbymjoachange.py
+# can replot with different DELTA_THRESHOLDS/colors without re-running this
+# whole script. Keyed by FRAME_MODE since 'peak' vs 'last' changes the values.
+delta_cache_path = os.path.join(
+    OUT_DIR, 'cache_prepost_sortedbymjoachange_{}.csv'.format(FRAME_MODE))
+delta_cache_parts = []
+for (cache_participant, cache_condition, cache_state), cache_df in state_per_patient.items():
+    if cache_state.strip().lower() not in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE):
+        continue
+    cache_part = cache_df[['element_label', 'mps', 'volume']].copy()
+    cache_part.insert(0, 'state', cache_state)
+    cache_part.insert(0, 'loading_condition', cache_condition)
+    cache_part.insert(0, 'participant', cache_participant)
+    delta_cache_parts.append(cache_part)
+pd.concat(delta_cache_parts, ignore_index=True).to_csv(delta_cache_path, index=False)
+print("Cached reduced data for standalone replotting: {}".format(delta_cache_path))
+
 delta_records = []
 for (delta_participant, delta_condition, delta_state), delta_df in sorted(state_per_patient.items()):
     delta_p_label = 'P{}'.format(delta_participant)
     if delta_p_label not in mjoa_delta_by_participant:
         continue
-    delta_records.append({
-        'participant': delta_p_label,
-        'loading_condition': delta_condition,
-        'state': delta_state,
-        'pct_above': pct_volume_above(delta_df, DELTA_THRESHOLD_VAL),
-    })
+    if delta_state.strip().lower() not in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE):
+        continue
+    for delta_threshold_name, delta_threshold_val in DELTA_THRESHOLDS.items():
+        delta_records.append({
+            'participant': delta_p_label,
+            'loading_condition': delta_condition,
+            'state': delta_state,
+            'threshold': delta_threshold_name,
+            'pct_above': pct_volume_above(delta_df, delta_threshold_val),
+        })
 delta_summary = pd.DataFrame(delta_records)
 
 delta_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_prepost_sortedbymjoachange.csv')
@@ -753,7 +796,7 @@ delta_x_pos = {p: i for i, p in enumerate(delta_participants)}
 
 # Fusion patients (surgical detail - only shaded on the PostOp row, since
 # fusion is a post-operative property and has no PreOp meaning).
-DELTA_FUSION_PARTICIPANTS = {'P1', 'P5', 'P7', 'P8'}   # N01-011, N01-014, N31-039, N31-046
+DELTA_FUSION_PARTICIPANTS = {'P1', 'P5', 'P7', 'P8'}   
 
 # Common y-limits across BOTH rows, so PreOp and PostOp are directly
 # comparable at a glance instead of each auto-scaling to its own data range.
@@ -761,40 +804,53 @@ delta_y_max = delta_summary['pct_above'].max()
 delta_ylim = (0, delta_y_max * 1.1 if delta_y_max > 0 else 1)
 
 delta_fig, (delta_ax_preop, delta_ax_postop) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
-delta_ax_by_state = {'preop': delta_ax_preop, 'postop': delta_ax_postop}
+delta_ax_by_state = {DELTA_TOP_STATE: delta_ax_preop, DELTA_BOTTOM_STATE: delta_ax_postop}
 
 for delta_state_name, delta_ax in delta_ax_by_state.items():
-    delta_sub = delta_summary[delta_summary['state'].astype(str).str.strip().str.lower() == delta_state_name]
-    for delta_participant_label, grp in delta_sub.groupby('participant'):
-        if len(grp) == 2:
-            xp = delta_x_pos[delta_participant_label]
-            delta_ax.vlines(xp, grp['pct_above'].min(), grp['pct_above'].max(),
-                             color=DELTA_THRESHOLD_COLOR, linewidth=1.0, alpha=0.5, zorder=2)
-    for delta_condition_name, grp in delta_sub.groupby('loading_condition'):
-        marker = CONDITION_MARKERS.get(delta_condition_name.strip().lower(), 'o')
-        xs = [delta_x_pos[p] for p in grp['participant']]
-        delta_ax.scatter(xs, grp['pct_above'], color=DELTA_THRESHOLD_COLOR, marker=marker, s=55, zorder=3)
-    if delta_state_name == 'postop':
+    delta_state_sub = delta_summary[delta_summary['state'].astype(str).str.strip().str.lower() == delta_state_name]
+    for delta_threshold_name in DELTA_THRESHOLDS:
+        delta_sub = delta_state_sub[delta_state_sub['threshold'] == delta_threshold_name]
+        delta_color = DELTA_THRESHOLD_COLORS[delta_threshold_name]
+        for delta_participant_label, grp in delta_sub.groupby('participant'):
+            if len(grp) == 2:
+                xp = delta_x_pos[delta_participant_label]
+                delta_ax.vlines(xp, grp['pct_above'].min(), grp['pct_above'].max(),
+                                 color=delta_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for delta_condition_name, grp in delta_sub.groupby('loading_condition'):
+            marker = CONDITION_MARKERS.get(delta_condition_name.strip().lower(), 'o')
+            xs = [delta_x_pos[p] for p in grp['participant']]
+            delta_ax.scatter(xs, grp['pct_above'], color=delta_color, marker=marker, s=55, zorder=3)
+    if delta_state_name == DELTA_BOTTOM_STATE:
         for delta_fusion_p in DELTA_FUSION_PARTICIPANTS:
             if delta_fusion_p in delta_x_pos:
                 xp = delta_x_pos[delta_fusion_p]
                 delta_ax.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
     delta_ax.set_ylim(delta_ylim)
-    delta_ax.set_ylabel('% cord volume\n>= {:.2f}'.format(DELTA_THRESHOLD_VAL))
-    delta_ax.set_title(delta_state_name.capitalize())
+    delta_ax.set_ylabel('% cord volume\nabove threshold')
+    delta_ax.set_title(DELTA_STATE_TITLES[delta_state_name])
 
+delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
+                                   label='{:.2f}'.format(val))
+                            for name, val in DELTA_THRESHOLDS.items()]
 delta_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                             for cond, marker in CONDITION_MARKERS.items()]
 delta_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion (PostOp)')]
-delta_fig.legend(handles=delta_condition_handles + delta_fusion_handle,
-                  loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+delta_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+delta_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + delta_threshold_handles +
+    [delta_blank_handle] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + delta_condition_handles +
+    [delta_blank_handle] + delta_fusion_handle
+)
+delta_fig.legend(handles=delta_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
 delta_ax_preop.tick_params(labelbottom=False)
 delta_ax_postop.set_xticks(range(len(delta_participants)))
 delta_ax_postop.set_xticklabels(
     ['{}\n(delta {:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
 delta_ax_postop.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
-delta_fig.suptitle('% cord volume >= {:.2f} MPS, PreOp vs PostOp'.format(DELTA_THRESHOLD_VAL))
+delta_fig.suptitle('% cord volume above MPS threshold, PreOp (no preload) vs PostOp')
 delta_fig.tight_layout()
 
 delta_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_prepost_sortedbymjoachange.pdf')
