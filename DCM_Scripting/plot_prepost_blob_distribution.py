@@ -6,21 +6,25 @@ magnitude (% of cord volume exceeding the threshold); its shape/shift
 reflects spatial concentration (a few large blobs vs many small scattered
 ones - the "chicken pox" pattern).
 
-Reads ONLY id_map.csv (for mJOA) and two small cache CSVs written by
-"Alex_results_multipatient_plot - compare_threshold.py" - never the raw
-per-frame extraction CSVs or the '_topology.csv' connectivity files - so
-editing PPBLOB_THRESHOLDS/colors below and re-running takes seconds:
+Fully self-contained: needs only id_map.csv plus the raw per-patient
+extraction files already on disk (the '_mps.csv'/'_topology.csv' pairs
+Alex_results_extraction.py writes next to each ODB). If either of its two
+caches is missing, this script builds it itself:
   - cache_prepost_sortedbymjoachange_{FRAME_MODE}.csv (element_label, mps,
-    volume per participant/condition/state - also used by
-    plot_prepost_sortedbymjoachange.py)
+    volume per participant/condition/state - read from each row's raw
+    '_mps.csv' and reduced via FRAME_MODE)
   - cache_prepost_blob_adjacency_{FRAME_MODE}.csv (adjacency edges per
-    participant/condition/state - threshold-independent, the expensive part
-    of blob analysis, parsed from topology ONCE in the main script)
+    participant/condition/state - parsed from each row's '_topology.csv',
+    threshold-independent, the slow part of blob analysis)
+Both are also the exact format plot_prepost_sortedbymjoachange.py (for the
+first one) and "Alex_results_multipatient_plot - compare_threshold.py"
+(for both) read/write - whichever script runs first builds them, every
+other script just reads them back.
 
 Run: python plot_prepost_blob_distribution.py
-Requires both caches to exist first - run
-"Alex_results_multipatient_plot - compare_threshold.py" at least once (or
-after the underlying per-patient data changes) to (re)generate them.
+First run (no caches yet) is slow - reads every PreOp-NoPreload/PostOp
+job's raw per-frame CSV and parses its topology. Every run after that,
+with both caches present, is fast.
 """
 
 import math
@@ -60,7 +64,6 @@ BLOB_CONDITION_LINESTYLES = {'flexion': '-', 'extension': '--'}
 DELTA_TOP_STATE = 'preop-nopreload'     # top row / blue curves: PreOp WITHOUT simulated preload
 DELTA_BOTTOM_STATE = 'postop'           # bottom row / orange curves: PostOp
 DELTA_STATE_TITLES = {DELTA_TOP_STATE: 'PreOp (no preload)', DELTA_BOTTOM_STATE: 'PostOp'}
-PPBLOB_STATE_COLORS = {DELTA_TOP_STATE: '#2a78d6', DELTA_BOTTOM_STATE: '#eb6834'}   # blue / orange
 # ============================================================
 
 plt.rcParams.update(PLOT_STYLE)
@@ -97,29 +100,111 @@ def find_blobs(exceeding_labels, edges):
     return list(groups.values())
 
 
-# --- Load caches ---
-mps_cache_path = os.path.join(OUT_DIR, 'cache_prepost_sortedbymjoachange_{}.csv'.format(FRAME_MODE))
-adjacency_cache_path = os.path.join(OUT_DIR, 'cache_prepost_blob_adjacency_{}.csv'.format(FRAME_MODE))
-for _cache_path in (mps_cache_path, adjacency_cache_path):
-    if not os.path.isfile(_cache_path):
-        raise SystemExit(
-            "No cache found at {}. Run "
-            "\"Alex_results_multipatient_plot - compare_threshold.py\" once first "
-            "(with FRAME_MODE='{}') to generate it.".format(_cache_path, FRAME_MODE))
+def reduce_to_frame_mode(df, mode):
+    if mode == 'last':
+        last_frame_idx = df['frame_index'].max()
+        return df[df['frame_index'] == last_frame_idx][['element_label', 'mps', 'volume']]
+    elif mode == 'peak':
+        peak_mps = df.groupby('element_label')['mps'].max()
+        volume = df.groupby('element_label')['volume'].first()
+        return pd.DataFrame({'mps': peak_mps, 'volume': volume}).reset_index()
+    else:
+        raise ValueError("FRAME_MODE must be 'last' or 'peak', got '{}'".format(mode))
 
-mps_cache_df = pd.read_csv(mps_cache_path)
+
+BLOB_FACE_SHARING_MIN_NODES = 4   # >=4 shared nodes approximates shared face (all elements are C3D8)
+
+
+def load_adjacency_edges(topology_path, min_shared_nodes=BLOB_FACE_SHARING_MIN_NODES):
+    elem_nodes = {}
+    with open(topology_path) as f:
+        next(f)  # header
+        for line in f:
+            label_str, nodes_str = line.strip().split(',', 1)
+            elem_nodes[int(label_str)] = set(int(n) for n in nodes_str.split(';'))
+
+    node_to_elems = defaultdict(list)
+    for elem, nodes in elem_nodes.items():
+        for n in nodes:
+            node_to_elems[n].append(elem)
+
+    shared_count = defaultdict(int)
+    for n, elems in node_to_elems.items():
+        elems = sorted(elems)
+        for i in range(len(elems)):
+            for j in range(i + 1, len(elems)):
+                shared_count[(elems[i], elems[j])] += 1
+
+    return [pair for pair, cnt in shared_count.items() if cnt >= min_shared_nodes]
+
+
+id_map = pd.read_csv(ID_MAP_PATH, skipinitialspace=True)
+
+# Rows this script needs data for: PreOp-NoPreload/PostOp, Flexion/Extension,
+# with a populated csv_path (set by Alex_results_extraction.py).
+_target_rows = id_map[
+    id_map['State'].astype(str).str.strip().str.lower().isin((DELTA_TOP_STATE, DELTA_BOTTOM_STATE)) &
+    id_map['loading_condition'].astype(str).str.strip().str.lower().isin(('flexion', 'extension')) &
+    id_map['csv_path'].astype(str).str.strip().astype(bool)
+]
+
+# --- mps/volume cache: build if missing, else read ---
+mps_cache_path = os.path.join(OUT_DIR, 'cache_prepost_sortedbymjoachange_{}.csv'.format(FRAME_MODE))
+if os.path.isfile(mps_cache_path):
+    mps_cache_df = pd.read_csv(mps_cache_path)
+else:
+    print("No mps/volume cache found - building it from raw per-frame CSVs (slow, one-time)...")
+    _mps_rows = []
+    for _, _row in _target_rows.iterrows():
+        _csv_path = str(_row['csv_path']).strip()
+        if not os.path.isfile(_csv_path):
+            print("  SKIPPING (file not found): {}".format(_csv_path))
+            continue
+        _raw_df = pd.read_csv(_csv_path)
+        _reduced = reduce_to_frame_mode(_raw_df, FRAME_MODE)
+        _reduced = _reduced.copy()
+        _reduced.insert(0, 'state', str(_row['State']).strip())
+        _reduced.insert(0, 'loading_condition', str(_row['loading_condition']).strip())
+        _reduced.insert(0, 'participant', int(_row['participant']))
+        _mps_rows.append(_reduced)
+    mps_cache_df = pd.concat(_mps_rows, ignore_index=True)
+    mps_cache_df.to_csv(mps_cache_path, index=False)
+    print("Cached mps/volume data: {}".format(mps_cache_path))
+
 state_per_patient = {
     (int(p), c, s): grp[['element_label', 'mps', 'volume']].reset_index(drop=True)
     for (p, c, s), grp in mps_cache_df.groupby(['participant', 'loading_condition', 'state'])
 }
 
-adjacency_cache_df = pd.read_csv(adjacency_cache_path)
+# --- blob adjacency cache: build if missing, else read ---
+adjacency_cache_path = os.path.join(OUT_DIR, 'cache_prepost_blob_adjacency_{}.csv'.format(FRAME_MODE))
+if os.path.isfile(adjacency_cache_path):
+    adjacency_cache_df = pd.read_csv(adjacency_cache_path)
+else:
+    print("No blob adjacency cache found - building it from '_topology.csv' files (slow, one-time)...")
+    _adjacency_rows = []
+    for _, _row in _target_rows.iterrows():
+        _csv_path = str(_row['csv_path']).strip()
+        _topology_path = _csv_path.replace('_mps.csv', '_topology.csv')
+        if not os.path.isfile(_topology_path):
+            print("  SKIPPING (no '_topology.csv', re-run Alex_results_extraction.py): {}".format(_topology_path))
+            continue
+        for _elem_a, _elem_b in load_adjacency_edges(_topology_path):
+            _adjacency_rows.append({
+                'participant':       int(_row['participant']),
+                'loading_condition': str(_row['loading_condition']).strip(),
+                'state':             str(_row['State']).strip(),
+                'elem_a':            _elem_a,
+                'elem_b':            _elem_b,
+            })
+    adjacency_cache_df = pd.DataFrame(_adjacency_rows)
+    adjacency_cache_df.to_csv(adjacency_cache_path, index=False)
+    print("Cached blob adjacency edges: {}".format(adjacency_cache_path))
+
 ppblob_adjacency_cache = {
     (int(p), c, s): list(zip(grp['elem_a'], grp['elem_b']))
     for (p, c, s), grp in adjacency_cache_df.groupby(['participant', 'loading_condition', 'state'])
 }
-
-id_map = pd.read_csv(ID_MAP_PATH, skipinitialspace=True)
 
 preop_mjoa_by_participant = {}
 for _, row in id_map.iterrows():
@@ -156,7 +241,6 @@ delta_x_pos = {p: i for i, p in enumerate(delta_participants)}
 # re-parsing topology.
 # ============================================================
 ppblob_records = []
-ppblob_pooled = defaultdict(list)   # (threshold_name, state, condition) -> list of (r, volume)
 
 for ppblob_threshold_name, ppblob_threshold_val in PPBLOB_THRESHOLDS.items():
     for (ppblob_participant, ppblob_condition, ppblob_state), ppblob_edges in ppblob_adjacency_cache.items():
@@ -173,8 +257,6 @@ for ppblob_threshold_name, ppblob_threshold_val in PPBLOB_THRESHOLDS.items():
         for ppblob in find_blobs(ppblob_exceeding, ppblob_edges):
             ppblob_volume = sum(ppblob_vol_lookup[lbl] for lbl in ppblob)
             ppblob_r = (3.0 * ppblob_volume / (4.0 * math.pi)) ** (1.0 / 3.0)
-            ppblob_pooled[(ppblob_threshold_name, ppblob_state_norm, ppblob_condition)].append(
-                (ppblob_r, ppblob_volume))
             ppblob_records.append({
                 'participant':       'P{}'.format(ppblob_participant),
                 'loading_condition': ppblob_condition,
@@ -190,57 +272,60 @@ ppblob_summary_path = os.path.join(OUT_DIR, 'multipatient_blob_distribution_prep
 ppblob_df.to_csv(ppblob_summary_path, index=False)
 print("PrePost blob summary saved: {}".format(ppblob_summary_path))
 
-# Each state's own total cord volume per condition (not shared across
-# states - PreOp-NoPreload and PostOp are different meshes for the same
-# patient, so a shared denominator would let mesh differences masquerade
-# as a magnitude change).
-ppblob_cord_vol_by_state_condition = defaultdict(float)
-for (ppblob_p, ppblob_c, ppblob_s) in ppblob_adjacency_cache:
-    if (ppblob_p, ppblob_c, ppblob_s) not in state_per_patient:
-        continue
-    ppblob_s_norm = ppblob_s.strip().lower()
-    ppblob_cord_vol_by_state_condition[(ppblob_s_norm, ppblob_c)] += (
-        state_per_patient[(ppblob_p, ppblob_c, ppblob_s)]['volume'].sum())
+# ============================================================
+# Seventh plot: per-patient faceted blob-size distribution, one panel per
+# threshold (5, laid out 2x3 with one blank) - EXACTLY the existing
+# PreOp-only grid plot's style (one curve per (patient, condition), color =
+# patient via tab10, linestyle = condition), produced as TWO complete
+# grids - one for PreOp-NoPreload, one for PostOp - rather than pooling
+# across patients or mixing states into one panel.
+# ============================================================
+pp_patients_sorted = sorted(ppblob_df['participant'].unique(),
+                             key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
+pp_patient_colors = {p: plt.cm.tab10(i % 10) for i, p in enumerate(pp_patients_sorted)}
 
-# ============================================================
-# Seventh plot: cumulative blob-size distribution grid, one panel per
-# threshold (5, laid out 2x3 with one blank). Pooled across all patients -
-# NOT per-patient (would be 12 x 2 x 2 = 48 curves per panel). Color =
-# state, linestyle = condition.
-# ============================================================
-ppblob_all_r = [r for blobs in ppblob_pooled.values() for r, _ in blobs]
-if not ppblob_all_r:
-    raise SystemExit("No blobs found at any threshold - check the caches have data for both states.")
-ppblob_r_min = min(ppblob_all_r) * 0.9
-ppblob_r_max = max(ppblob_all_r) * 1.1
+# Common x/y range across BOTH states and ALL thresholds, so every panel
+# (and the two states' grids) is directly comparable.
+pp_r_min = ppblob_df['r'].min()
+pp_r_max = ppblob_df['r'].max()
+pp_xlim = (pp_r_min * 0.9, pp_r_max * 1.1)
+pp_ylim = (0, 102)
+
+# Each state's own total cord volume per (participant, condition) - fixed
+# regardless of threshold, so a curve's final height shows the real % of
+# that patient's cord exceeding the threshold. PreOp-NoPreload and PostOp
+# are different meshes for the same patient, so this is kept per-state
+# rather than shared, the same reasoning as the removed pooled version.
+pp_total_cord_vol_by_state = {}
+for (pp_p, pp_c, pp_s), pp_df in state_per_patient.items():
+    pp_s_norm = pp_s.strip().lower()
+    pp_total_cord_vol_by_state.setdefault(pp_s_norm, {})[(pp_p, pp_c)] = pp_df['volume'].sum()
 
 PP_LOG_MAJOR_LOCATOR = LogLocator(base=10.0)
 PP_LOG_NULL_FORMATTER = NullFormatter()
 
 
-def ppblob_plot_threshold(ax, threshold_name):
-    for ppblob_state_name in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE):
-        for ppblob_condition_name in ('Flexion', 'Extension'):
-            blobs = ppblob_pooled.get((threshold_name, ppblob_state_name, ppblob_condition_name))
-            if not blobs:
-                continue
-            blobs_sorted = sorted(blobs, key=lambda b: b[0])
-            total_vol = ppblob_cord_vol_by_state_condition[(ppblob_state_name, ppblob_condition_name)]
-            if total_vol <= 0:
-                continue
-            rs = [ppblob_r_min] + [b[0] for b in blobs_sorted] + [ppblob_r_max]
-            cum_vol = 0.0
-            cum_pct = [0.0]
-            for _, v in blobs_sorted:
-                cum_vol += v
-                cum_pct.append(100.0 * cum_vol / total_vol)
-            cum_pct.append(cum_pct[-1])
-            color = PPBLOB_STATE_COLORS[ppblob_state_name]
-            linestyle = BLOB_CONDITION_LINESTYLES.get(ppblob_condition_name.strip().lower(), ':')
-            ax.plot(rs, cum_pct, color=color, linestyle=linestyle, linewidth=1.5, drawstyle='steps-post')
+def pp_plot_threshold(ax, threshold_name, state_name):
+    sub = ppblob_df[(ppblob_df['threshold'] == threshold_name) & (ppblob_df['state'] == state_name)]
+    pp_total_cord_vol = pp_total_cord_vol_by_state.get(state_name, {})
+    for (pp_participant, pp_condition), grp in sub.groupby(['participant', 'loading_condition']):
+        grp_sorted = grp.sort_values('r')
+        pp_participant_num = int(pp_participant[1:])   # 'P6' -> 6, to match state_per_patient's int key
+        pp_total_vol = pp_total_cord_vol.get((pp_participant_num, pp_condition), 0.0)
+        if pp_total_vol <= 0:
+            continue
+        pp_cum_pct = list(100.0 * grp_sorted['volume'].cumsum() / pp_total_vol)
+        # Extend to the shared axis edges (0% at the left, held flat at the
+        # final value out to the right) so the curve doesn't stop short and
+        # appear to float in the middle of the panel.
+        pp_rs = [pp_xlim[0]] + list(grp_sorted['r']) + [pp_xlim[1]]
+        pp_ys = [0.0] + pp_cum_pct + [pp_cum_pct[-1]]
+        pp_color = pp_patient_colors[pp_participant]
+        pp_linestyle = BLOB_CONDITION_LINESTYLES.get(pp_condition.strip().lower(), ':')
+        ax.plot(pp_rs, pp_ys, color=pp_color, linestyle=pp_linestyle, linewidth=1.2, drawstyle='steps-post')
     ax.set_xscale('log')
-    ax.set_xlim(ppblob_r_min, ppblob_r_max)
-    ax.set_ylim(0, 100)
+    ax.set_xlim(pp_xlim)
+    ax.set_ylim(pp_ylim)
     ax.xaxis.set_major_locator(PP_LOG_MAJOR_LOCATOR)
     ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
     ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), PPBLOB_THRESHOLDS[threshold_name]))
@@ -248,38 +333,45 @@ def ppblob_plot_threshold(ax, threshold_name):
     ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
 
 
-ppblob_state_handles = [Line2D([0], [0], color=PPBLOB_STATE_COLORS[s], linestyle='-',
-                                label=DELTA_STATE_TITLES[s])
-                         for s in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE)]
-ppblob_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
-                             for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
+pp_patient_handles = [Line2D([0], [0], color=pp_patient_colors[p], linestyle='-',
+                              label='{} (preop mJOA {})'.format(p, preop_mjoa_by_participant.get(p, '?')))
+                       for p in pp_patients_sorted]
+pp_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
+                         for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
 
-# --- Five individual per-threshold plots ---
-for ppblob_threshold_name in PPBLOB_THRESHOLDS:
-    ppblob_fig, ppblob_ax = plt.subplots(figsize=(7, 5.5))
-    ppblob_plot_threshold(ppblob_ax, ppblob_threshold_name)
-    ppblob_fig.legend(handles=ppblob_state_handles + ppblob_condition_handles,
-                       loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
-    ppblob_fig.tight_layout()
-    ppblob_plot_path = os.path.join(
-        OUT_DIR, 'multipatient_mps_plot_blob_distribution_prepost_{}.pdf'.format(ppblob_threshold_name))
-    ppblob_fig.savefig(ppblob_plot_path, bbox_inches='tight')
-    plt.close(ppblob_fig)
-    print("Plot saved: {}".format(ppblob_plot_path))
+for pp_state_name in (DELTA_TOP_STATE, DELTA_BOTTOM_STATE):
+    pp_state_suffix = pp_state_name.replace('-', '')   # 'preop-nopreload' -> 'preopnopreload'
 
-# --- Combined 2x3 grid (5 panels + 1 blank) ---
-ppblob_grid_fig, ppblob_grid_axes = plt.subplots(2, 3, figsize=(18, 10))
-for ppblob_ax_grid, ppblob_threshold_name in zip(ppblob_grid_axes.flat, PPBLOB_THRESHOLDS):
-    ppblob_plot_threshold(ppblob_ax_grid, ppblob_threshold_name)
-ppblob_grid_axes.flat[-1].axis('off')   # 6th slot unused (5 thresholds, 2x3 grid)
+    # --- Five individual per-threshold plots ---
+    for pp_threshold_name in PPBLOB_THRESHOLDS:
+        pp_fig, pp_ax = plt.subplots(figsize=(7, 5.5))
+        pp_plot_threshold(pp_ax, pp_threshold_name, pp_state_name)
+        pp_fig.suptitle(DELTA_STATE_TITLES[pp_state_name])
+        pp_fig.legend(handles=pp_patient_handles + pp_condition_handles,
+                      loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
+        pp_fig.tight_layout()
+        pp_plot_path = os.path.join(
+            OUT_DIR, 'multipatient_mps_plot_blob_distribution_prepost_{}_{}.pdf'.format(
+                pp_state_suffix, pp_threshold_name))
+        pp_fig.savefig(pp_plot_path, bbox_inches='tight')
+        plt.close(pp_fig)
+        print("Plot saved: {}".format(pp_plot_path))
 
-ppblob_grid_fig.legend(handles=ppblob_state_handles + ppblob_condition_handles,
+    # --- Combined 2x3 grid (5 panels + 1 blank) ---
+    pp_grid_fig, pp_grid_axes = plt.subplots(2, 3, figsize=(18, 10))
+    for pp_ax_grid, pp_threshold_name in zip(pp_grid_axes.flat, PPBLOB_THRESHOLDS):
+        pp_plot_threshold(pp_ax_grid, pp_threshold_name, pp_state_name)
+    pp_grid_axes.flat[-1].axis('off')   # 6th slot unused (5 thresholds, 2x3 grid)
+
+    pp_grid_fig.suptitle(DELTA_STATE_TITLES[pp_state_name])
+    pp_grid_fig.legend(handles=pp_patient_handles + pp_condition_handles,
                         loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
-ppblob_grid_fig.tight_layout()
-ppblob_grid_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution_prepost_grid.pdf')
-ppblob_grid_fig.savefig(ppblob_grid_plot_path, bbox_inches='tight')
-plt.close(ppblob_grid_fig)
-print("Plot saved: {}".format(ppblob_grid_plot_path))
+    pp_grid_fig.tight_layout()
+    pp_grid_plot_path = os.path.join(
+        OUT_DIR, 'multipatient_mps_plot_blob_distribution_prepost_{}_grid.pdf'.format(pp_state_suffix))
+    pp_grid_fig.savefig(pp_grid_plot_path, bbox_inches='tight')
+    plt.close(pp_grid_fig)
+    print("Plot saved: {}".format(pp_grid_plot_path))
 
 # --- Aggregated per-(participant, condition, threshold, state) stats ---
 ppblob_stats = ppblob_df.groupby(['participant', 'loading_condition', 'threshold', 'state']).agg(
