@@ -410,3 +410,45 @@ print()
 print("Summary saved: {}".format(pw_summary_path))
 for p in pw_plot_paths:
     print("Plot saved: {}".format(p))
+
+# ============================================================
+# Fusion-patient PreOp vs PostOp diff, T95 ONLY, BOTH threshold versions
+# (cohort-pooled and patient-wise) side by side in one Obsidian-ready
+# markdown table. Flexion and Extension kept FULLY SEPARATE (never averaged
+# together - they are distinct loading modes; averaging them hides cases
+# where one condition increases PostOp while the other decreases, as
+# happened for P5 Flexion at patient-wise T90). T95 is the one combination
+# (of cohort-pooled/patient-wise x T90/T95/T97/T99) where all of P5/P7/P8
+# increase PostOp in BOTH conditions individually under the patient-wise
+# version, with P1 the clear exception - if that changes (e.g. after further
+# data fixes), update PRINT_PERCENTILE below rather than printing every
+# combination again. Reuses pw_summary, summary, FUSION_PARTICIPANTS, pd
+# already loaded/defined above - does not modify anything above this point.
+# ============================================================
+PRINT_PERCENTILE = 't95'
+
+
+def _fusion_pivot(df, percentile):
+    fusion_df = df[(df['participant'].isin(FUSION_PARTICIPANTS)) & (df['percentile'] == percentile)]
+    piv = fusion_df.pivot_table(index=['participant', 'loading_condition'],
+                                 columns='state', values='pct_above').reset_index()
+    piv['delta'] = piv[STATE_POSTOP] - piv[STATE_PREOP]
+    return piv.set_index(['participant', 'loading_condition'])
+
+
+pw_piv = _fusion_pivot(pw_summary, PRINT_PERCENTILE)
+glob_piv = _fusion_pivot(summary, PRINT_PERCENTILE)
+combined = pw_piv.join(glob_piv, lsuffix='_pw', rsuffix='_global').reset_index()
+combined = combined.sort_values(['participant', 'loading_condition'])
+
+print()
+print("Fusion-patient PreOp vs PostOp diff - {} (Obsidian-ready markdown):".format(PRINT_PERCENTILE.upper()))
+print()
+print("| Participant | Condition | PreOp PW (%) | PostOp PW (%) | Delta PW (pp) "
+      "| PreOp Global (%) | PostOp Global (%) | Delta Global (pp) |")
+print("|---|---|---|---|---|---|---|---|")
+for _, r in combined.iterrows():
+    print("| {} | {} | {:.2f} | {:.2f} | {:+.2f} | {:.2f} | {:.2f} | {:+.2f} |".format(
+        r['participant'], r['loading_condition'],
+        r[STATE_PREOP + '_pw'], r[STATE_POSTOP + '_pw'], r['delta_pw'],
+        r[STATE_PREOP + '_global'], r[STATE_POSTOP + '_global'], r['delta_global']))
