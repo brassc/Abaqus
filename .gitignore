@@ -25,6 +25,9 @@ wheels/
 DCM_Scripting/Data_Extraction/patient_metadata.csv
 DCM_Scripting/id_map.csv
 
+# Regenerable cache files (derived from raw extraction data, rebuilt by the scripts)
+DCM_Scripting/cache_*.csv
+
 # Abaqus specific
 *.rpy
 *.rpy.*
