@@ -1,7 +1,9 @@
 """
 plot_oscillation_effect.py - For the CSF-pulsation oscillation (Step-3 of each
-id_map.csv loading_condition='Oscillation' job), compare two different % cord
-volume above threshold metrics, per patient:
+id_map.csv State=='PreOp', loading_condition='Oscillation' job - PreOp
+oscillation only, NOT the separate PostOp-oscillation rows id_map.csv also
+has), compare two different % cord volume above threshold metrics, per
+patient:
 
   Cumulative - each element's own PEAK mps over the whole oscillation history
   (the usual 'peak' reduction used everywhere else in this codebase), i.e. the
@@ -67,10 +69,10 @@ METRIC_FILLED = {METRIC_CUMULATIVE: True, METRIC_AT_PEAK: False}   # solid vs ho
 # threshold increases) - orange was too close to the 0.15 red to tell apart
 # at a glance; 0.10/0.15 keep the blue/red used throughout the other
 # multipatient plots in this codebase.
-CACHE_THRESHOLDS = {'t0p01': 0.01, 't0p02': 0.02, 't0p03': 0.03, 't0p04': 0.04, 't0p05': 0.05,
-                     't0p10': 0.10, 't0p15': 0.15}
+CACHE_THRESHOLDS = {'t0p10': 0.10, 't0p15': 0.15} #{'t0p01': 0.01, 't0p02': 0.02, 't0p03': 0.03, 't0p04': 0.04, 't0p05': 0.05,
+                    # 't0p10': 0.10, 't0p15': 0.15}
 CACHE_THRESHOLD_COLORS = {
-    't0p01': '#c7e9c0', 't0p02': '#a1d99b', 't0p03': '#74c476', 't0p04': '#31a354', 't0p05': '#006d2c',
+    #'t0p01': '#c7e9c0', 't0p02': '#a1d99b', 't0p03': '#74c476', 't0p04': '#31a354', 't0p05': '#006d2c',
     't0p10': '#2e75b6', 't0p15': '#c00000',
 }
 
@@ -92,7 +94,7 @@ def reduce_to_peak(df):
 # the single cumulative pct_above value, per participant per threshold. NOT
 # the full raw per-element-per-frame data (much larger, unnecessary to keep).
 # ============================================================
-own_cache_path = os.path.join(OUT_DIR, 'cache_oscillation_cumulative_vs_peak.csv')
+own_cache_path = os.path.join(OUT_DIR, 'cache_oscillation_cumulative_vs_peak_preop.csv')
 
 id_map = pd.read_csv(ID_MAP_PATH, skipinitialspace=True)
 
@@ -101,9 +103,16 @@ if os.path.isfile(own_cache_path):
     cache_df = pd.read_csv(own_cache_path)
 else:
     print("No cache at {} yet - building it.".format(own_cache_path))
-    osc_rows = id_map[id_map['loading_condition'].astype(str).str.strip().str.lower() == STATE_OSCILLATION.lower()]
+    # PreOp oscillation only - id_map.csv also has a separate PostOp-oscillation
+    # row per patient (same loading_condition, State=='PostOp'); without the
+    # State filter this would silently pool both together.
+    osc_rows = id_map[
+        (id_map['loading_condition'].astype(str).str.strip().str.lower() == STATE_OSCILLATION.lower()) &
+        (id_map['State'].astype(str).str.strip().str.lower() == 'preop')
+    ]
     if osc_rows.empty:
-        raise SystemExit("No rows with loading_condition == '{}' found in id_map.csv.".format(STATE_OSCILLATION))
+        raise SystemExit("No rows with loading_condition == '{}' and State == 'PreOp' found in "
+                          "id_map.csv.".format(STATE_OSCILLATION))
 
     cache_rows = []
     missing = []
@@ -148,11 +157,15 @@ else:
 
 target_participants = sorted(cache_df['participant'].unique())
 
-# Pre-op mJOA - pulled directly from the Oscillation rows themselves (same
-# clinical value regardless of which simulation variant carries it).
+# Pre-op mJOA - pulled directly from the PreOp Oscillation rows themselves.
+# Must filter State=='PreOp' here too - id_map.csv's PostOp-oscillation rows
+# carry the POST-op mJOA value instead, which would silently overwrite the
+# correct one for whichever row pandas iterates last.
 preop_mjoa_by_participant = {}
 for _, row in id_map.iterrows():
     if str(row.get('loading_condition', '')).strip().lower() != STATE_OSCILLATION.lower():
+        continue
+    if str(row.get('State', '')).strip().lower() != 'preop':
         continue
     p_label = 'P{}'.format(int(row['participant']))
     preop_mjoa_by_participant[p_label] = row.get('mJOA', '')
@@ -311,7 +324,7 @@ for name in DELTA_DISPLAY_THRESHOLDS:
     # alpha<1 so overlapping points (common here - many patients cluster near
     # delta=0) show as visibly darker/stacked instead of hiding each other.
     delta_ax.scatter(xs, col_df['delta_at_peak_minus_baseline'], color=color, marker='o', s=55,
-                      alpha=0.55, edgecolors='none', zorder=3)
+                      alpha=1, edgecolors='none', zorder=3)
 
 delta_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
 delta_ax.set_ylim(delta_ylim)
