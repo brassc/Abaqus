@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem Merges D:\Charlotte source folders into the F: and G: backup drives.
+rem Merges D:\Charlotte source folders, plus this git repo, into the F: and G: backup drives.
 rem
 rem Behavior (per folder, per destination drive):
 rem   - Files that don't exist on the destination are copied.
@@ -17,6 +17,7 @@ rem   backup_to_drives.bat -whatif    (dry run - lists what would copy, copies n
 
 set "SOURCE1=D:\Charlotte\ABAQUS"
 set "SOURCE2=D:\Charlotte\cmb247 - Segmentation"
+set "REPO=C:\Users\cmb247\repos\Abaqus"
 set "LOOSEROOT=D:\"
 set "DEST1=F:\"
 set "DEST2=G:\"
@@ -42,6 +43,8 @@ set "NEWCOUNT=0"
 for %%S in ("%SOURCE1%" "%SOURCE2%") do (
     call :ProcessSource "%%~S"
 )
+
+call :ProcessFolder "%REPO%" "Abaqus"
 
 call :ProcessLooseFiles
 
