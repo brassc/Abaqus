@@ -59,8 +59,25 @@ OUTPUT_DIR = os.path.dirname(ODB_PATH)
 # Batch-loop bookkeeping - persists across repeated execfile() calls in the
 # same kernel session (each loop iteration re-execfile's this whole script,
 # so a plain assignment here would otherwise reset the list every time).
-if 'VERSION_MISMATCH_ODB_PATHS' not in dir():
-    VERSION_MISMATCH_ODB_PATHS = []
+#
+# Two DIFFERENT version-mismatch directions need two DIFFERENT fixes, so they
+# are tracked separately rather than lumped into one "VERSION_MISMATCH" bucket
+# (which previously always suggested "re-run under Abaqus 2022" regardless of
+# which direction the mismatch actually was - wrong and misleading whenever
+# the file needed something OTHER than exactly 2022):
+#   NEWER_REQUIRED - the ODB is from a MORE RECENT Abaqus release than this
+#     kernel ("...must be upgraded before this output database can be
+#     opened"). No command-line fix - -upgrade only converts old-format files
+#     to new, never the reverse. Needs opening in an actually newer Abaqus
+#     install.
+#   UPGRADE_NEEDED - the ODB is from a PREVIOUS (older) Abaqus release
+#     ("Run abaqus -upgrade ... to upgrade it"). Abaqus's own error message
+#     already names the exact fix: `abaqus -upgrade -job <newFileName> -odb
+#     <oldOdbFileName>` converts it in place - no older kernel needed at all.
+if 'NEWER_REQUIRED_ODB_PATHS' not in dir():
+    NEWER_REQUIRED_ODB_PATHS = []
+if 'UPGRADE_NEEDED_ODB_PATHS' not in dir():
+    UPGRADE_NEEDED_ODB_PATHS = []
 if 'OTHER_FAILED_ODB_PATHS' not in dir():
     OTHER_FAILED_ODB_PATHS = []
 
@@ -68,17 +85,21 @@ if 'OTHER_FAILED_ODB_PATHS' not in dir():
 # the one running this kernel raises here (wrong release for this ODB), and
 # without a try/except that exception would propagate out of execfile() and
 # kill the REST of the batch loop, not just this one ODB_PATH. Catch it,
-# record it, and let the script finish normally so the loop moves on to the
-# next ODB_PATH.
+# classify which DIRECTION the mismatch is (see above), and let the script
+# finish normally so the loop moves on to the next ODB_PATH.
 odb = None
 try:
     odb = openOdb(path=ODB_PATH, readOnly=True)
 except Exception as e:
     msg = str(e)
-    is_version_mismatch = any(kw in msg.lower() for kw in ('version', 'release', 'incompatib'))
-    if is_version_mismatch:
-        print("SKIPPING (wrong Abaqus version for this ODB): {}".format(ODB_PATH))
-        VERSION_MISMATCH_ODB_PATHS.append(ODB_PATH)
+    msg_lower = msg.lower()
+    if 'more recent' in msg_lower:
+        print("SKIPPING (ODB needs a NEWER Abaqus release than this kernel): {}".format(ODB_PATH))
+        NEWER_REQUIRED_ODB_PATHS.append(ODB_PATH)
+    elif 'previous release' in msg_lower or 'upgrade' in msg_lower:
+        print("SKIPPING (ODB is from an OLDER Abaqus release - needs 'abaqus -upgrade', "
+              "not a different kernel): {}".format(ODB_PATH))
+        UPGRADE_NEEDED_ODB_PATHS.append(ODB_PATH)
     else:
         print("SKIPPING (failed to open ODB): {}".format(ODB_PATH))
         OTHER_FAILED_ODB_PATHS.append(ODB_PATH)
@@ -174,20 +195,29 @@ if odb is not None:
     finally:
         odb.close()
 
-# --- Batch summary (prints every call, reflects what's accumulated so far -
-# just read it after the LAST ODB_PATH in the loop has run). Paste the
-# VERSION_MISMATCH block directly into the Abaqus 2022 kernel as
-# ODB_PATHS_2022, run the same for/execfile loop there.
-if VERSION_MISMATCH_ODB_PATHS or OTHER_FAILED_ODB_PATHS:
-    print("")
-    print("=== Batch summary so far ===")
-    if VERSION_MISMATCH_ODB_PATHS:
-        print("{} ODB(s) need a different Abaqus version - re-run under Abaqus 2022:".format(
-            len(VERSION_MISMATCH_ODB_PATHS)))
-        print("ODB_PATHS_2022 = [")
-        for p in VERSION_MISMATCH_ODB_PATHS:
-            print("    r'{}',".format(p))
-        print("]")
+# --- Batch summary - NOT auto-printed every call (that reprints the whole
+# growing list on every single ODB_PATH in the loop, which floods the console
+# across a large batch). Call print_batch_summary() yourself once, after the
+# LAST ODB_PATH has run, to see it.
+def print_batch_summary():
+    if not (NEWER_REQUIRED_ODB_PATHS or UPGRADE_NEEDED_ODB_PATHS or OTHER_FAILED_ODB_PATHS):
+        print("No failures.")
+        return
+    print("=== Batch summary ===")
+    if NEWER_REQUIRED_ODB_PATHS:
+        print("{} ODB(s) need a NEWER Abaqus release than this kernel - there is no command-line "
+              "fix (abaqus -upgrade only converts old format to new, never the reverse); open "
+              "these in whatever newer Abaqus install is available:".format(
+                  len(NEWER_REQUIRED_ODB_PATHS)))
+        for p in NEWER_REQUIRED_ODB_PATHS:
+            print("    {}".format(p))
+    if UPGRADE_NEEDED_ODB_PATHS:
+        print("{} ODB(s) are from an OLDER Abaqus release - fix with 'abaqus -upgrade', NOT a "
+              "different kernel (run from the command line, not inside a kernel session):".format(
+                  len(UPGRADE_NEEDED_ODB_PATHS)))
+        for p in UPGRADE_NEEDED_ODB_PATHS:
+            print("    abaqus -upgrade -job {}_upgraded -odb \"{}\"".format(
+                os.path.splitext(os.path.basename(p))[0], p))
     if OTHER_FAILED_ODB_PATHS:
         print("{} ODB(s) failed for other reasons (not a version mismatch):".format(
             len(OTHER_FAILED_ODB_PATHS)))
