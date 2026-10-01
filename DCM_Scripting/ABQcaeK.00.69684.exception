@@ -1,0 +1,43 @@
+<Description>
+   ABQcaeK.exe / rank 0 / thread 0  encountered an unhandled exception
+
+</Description>
+
+<Context>
+   CAE
+</Context>
+
+<Callstack>
+  1)  KERNELBASE.dll                  RaiseException                          
+  2)  VCRUNTIME140.dll                CxxThrowException                       
+  3)  ABQSMAInbVwrIPC.dll             ipc_Socket::Disconnect                  
+  4)  ABQSMAInkVwrKer.dll             ker_main                                
+  5)  ABQcaeK.exe                   unknown                                 
+</Callstack>
+
+<Memory>
+   <Current>            0 GB </Current>
+   <Resident>           0 GB </Resident>
+   <Physical>          63 GB </Physical>
+   <Limit>              0 GB </Limit>
+   <Accessible>        63 GB </Accessible>
+   <Free>              41 GB </Free>
+   <Allocator>            DL </Allocator>
+</Memory>
+
+<Swap>
+       <Size>          67 GB </Size>
+       <Used>          25 GB </Used>
+       <Free>          42 GB </Free>
+</Swap>
+
+<Directories>
+  <current> C:\Users\cmb247\repos\Abaqus\DCM_Scripting </current> <free>     55 GB </free>   <used>    415 GB </used> 
+     <temp> C:\Users\cmb247\AppData\Local\Temp </temp>    <free>     55 GB </free>
+</Directories>
+
+<Installation>
+     <Version> 2025 2025 </Version>
+       <Build> 2024_09_20-14.00.46 RELr427 198590 </Build>
+</Installation>
+
