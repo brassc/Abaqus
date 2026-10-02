@@ -72,8 +72,23 @@ STATE_FILLED = {STATE_PREOP: True, STATE_POSTOP: False}   # solid vs hollow mark
 
 CONDITION_MARKERS = {'flexion': 's', 'extension': '^'}
 
-PERCENTILES = {'t90': 0.90, 't95': 0.95, 't97': 0.97, 't99': 0.99}
-PERCENTILE_COLORS = {'t90': '#548235', 't95': '#2e75b6', 't97': '#c00000', 't99': '#7030a0'}
+# T90/T97/T99 commented out (not deleted) - only T95 (global and patientwise)
+# is of interest right now. Everything downstream (COHORT_THRESHOLDS,
+# PATIENT_THRESHOLDS, the summary tables, and the per-percentile plot loop)
+# is driven entirely by this dict, so restricting it to T95 is the only
+# change needed to limit the whole script to T95 only.
+PERCENTILES = {
+    # 't90': 0.90,
+    't95': 0.95,
+    # 't97': 0.97,
+    # 't99': 0.99,
+}
+PERCENTILE_COLORS = {
+    # 't90': '#548235',
+    't95': '#2e75b6',
+    # 't97': '#c00000',
+    # 't99': '#7030a0',
+}
 
 # Fusion patients - shaded orange across the whole column (both states), same
 # convention as plot_prepost_sortedbymjoachange.py's combined single-row plot.
