@@ -21,6 +21,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.colors import to_rgba
 
 from mps_common import PLOT_STYLE
 
@@ -392,6 +393,59 @@ ro.r('''
     model1 <- lmerTest::lmer(pct_above ~ tissue + (1 | patient), data = m1_data)
     print(summary(model1))
 ''')
+
+# Box plot of raw per-patient GM/WM values (paired lines, since each patient
+# has both) with the LME's estimated means overlaid.
+ro.r('''
+    fe1 <- fixef(model1)
+    gm_mean <- as.numeric(fe1['(Intercept)'])
+    wm_mean <- as.numeric(fe1['(Intercept)'] + fe1['tissueWM'])
+    p1 <- summary(model1)$coefficients['tissueWM', 'Pr(>|t|)']
+''')
+gm_mean, wm_mean = ro.r('gm_mean')[0], ro.r('wm_mean')[0]
+p1 = ro.r('p1')[0]
+p1_label = 'p < 0.001' if p1 < 0.001 else 'p = {:.3f}'.format(p1)
+
+gm_vals = m1_df[m1_df['tissue'] == 'GM'].set_index('patient')['pct_above']
+wm_vals = m1_df[m1_df['tissue'] == 'WM'].set_index('patient')['pct_above']
+
+NAVY = '#003f5c'    # raw data points
+TEAL = '#58a4b0'    # box fill
+
+fig, ax = plt.subplots(figsize=(5, 5.5))
+box = ax.boxplot([gm_vals.values, wm_vals.values], positions=[0, 1], widths=0.35,
+                  showfliers=False, patch_artist=True, zorder=2)
+for patch in box['boxes']:
+    patch.set_facecolor(to_rgba(TEAL, 0.4))
+    patch.set_edgecolor('black')
+    patch.set_linewidth(0.5)
+for part in ('whiskers', 'caps', 'medians'):
+    for line in box[part]:
+        line.set_color('black')
+        line.set_linewidth(0.5)
+for patient in gm_vals.index:
+    ax.plot([0, 1], [gm_vals[patient], wm_vals[patient]], color='lightgray', linewidth=0.3, alpha=0.6, zorder=1)
+ax.scatter([0] * len(gm_vals), gm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
+ax.scatter([1] * len(wm_vals), wm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
+ax.scatter([0, 1], [gm_mean, wm_mean], marker='d', s=80, facecolor='red',
+           edgecolor='black', linewidth=1.5, zorder=5, label='LME estimate')
+
+bracket_y, tick = 58, 1.5
+ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+        color='black', linewidth=1.2, zorder=6)
+ax.text(0.5, bracket_y + 1, p1_label, ha='center', va='bottom', fontsize=10)
+
+ax.set_xticks([0, 1])
+ax.set_xticklabels(['GM', 'WM'])
+ax.set_ylabel('% of tissue volume above threshold (0.10)')
+ax.set_title('PreOp with Preload: Grey Matter vs. White Matter')
+ax.set_ylim(0, 70)
+ax.legend(loc='upper left', frameon=False)
+fig.tight_layout()
+model1_box_path = os.path.join(OUT_DIR, 'lmm_model1_boxplot.pdf')
+fig.savefig(model1_box_path, bbox_inches='tight')
+plt.close(fig)
+print("  Plot saved: {}".format(model1_box_path))
 
 print("")
 print("--- Model 2: pct_above ~ tissue + region + (1 | patient) ---")

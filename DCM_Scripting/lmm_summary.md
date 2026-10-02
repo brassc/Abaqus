@@ -45,22 +45,3 @@ No difference in % of cord volume above MPS $=0.10$ between grey and white matte
 | (Intercept) | 13.63 | 3.639 | 11.49 | 3.745 | 0.003009 |
 | tissueWM | 5.658 | 0.7674 | 33.01 | 7.374 | 1.809e-08 |
 | regionInterior | -0.27 | 0.7674 | 33.01 | -0.3518 | 0.7272 |
-
-## Sensitivity check: arcsine-sqrt transformed
-
-`pct_above` is a bounded proportion with real 0%/100% cells; re-fit on $\arcsin(\sqrt{p})$ to check the conclusions aren't an artifact of non-constant variance near the boundaries.
-
-**Model 1 (transformed)**
-
-| Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
-|---|---|---|---|---|---|
-| (Intercept) | 0.3452 | 0.04889 | 11.6 | 7.062 | 1.578e-05 |
-| tissueWM | 0.08875 | 0.01594 | 11 | 5.568 | 0.0001681 |
-
-**Model 2 (transformed)**
-
-| Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
-|---|---|---|---|---|---|
-| (Intercept) | 0.3452 | 0.04926 | 11.5 | 7.008 | 1.776e-05 |
-| tissueWM | 0.09169 | 0.01054 | 33.01 | 8.702 | 4.657e-10 |
-| regionInterior | -0.00466 | 0.01054 | 33.01 | -0.4423 | 0.6612 |
