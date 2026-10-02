@@ -448,7 +448,7 @@ combined['threshold_global'] = COHORT_THRESHOLDS[PRINT_PERCENTILE]
 print()
 print("Fusion-patient PreOp vs PostOp diff - {} (Obsidian-ready markdown):".format(PRINT_PERCENTILE.upper()))
 print()
-print("| Participant | Condition | Threshold PW | PreOp PW (%) | PostOp PW (%) | Delta PW (pp) "
+print("| Participant | Condition | Threshold PS | PreOp PS (%) | PostOp PS (%) | Delta PS (pp) "
       "| Threshold Global | PreOp Global (%) | PostOp Global (%) | Delta Global (pp) |")
 print("|---|---|---|---|---|---|---|---|---|---|")
 for _, r in combined.iterrows():
@@ -466,7 +466,7 @@ for _, r in combined.iterrows():
 print()
 print("Threshold values - {} (Obsidian-ready markdown):".format(PRINT_PERCENTILE.upper()))
 print()
-print("| Participant | Threshold PW (MPS) | Threshold Global (MPS) |")
+print("| Participant | Threshold PS (MPS) | Threshold Global (MPS) |")
 print("|---|---|---|")
 for fusion_p in sorted(FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
     print("| {} | {:.4f} | {:.4f} |".format(
