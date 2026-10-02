@@ -409,7 +409,31 @@ ro.r('''
         rownames(df) <- NULL
         df
     }
+    get_varcorr_df <- function(model) {
+        as.data.frame(VarCorr(model))
+    }
 ''')
+
+
+def format_random_effects_md(varcorr_df):
+    """Random-effects table + ICC (patient variance / total variance)."""
+    patient_var = resid_var = None
+    lines = ['| Group | Variance | Std.Dev. |', '|---|---|---|']
+    for _, row in varcorr_df.iterrows():
+        grp = row['grp']
+        lines.append('| {} | {:.4g} | {:.4g} |'.format(grp, row['vcov'], row['sdcor']))
+        if grp == 'patient':
+            patient_var = row['vcov']
+        elif grp == 'Residual':
+            resid_var = row['vcov']
+    table = '\n'.join(lines)
+    if patient_var is not None and resid_var is not None and (patient_var + resid_var) > 0:
+        icc = patient_var / (patient_var + resid_var)
+        flag = ' (singular/near-zero)' if icc < 0.01 else ''
+        icc_line = '\n\n**ICC = {:.3f}**{}'.format(icc, flag)
+    else:
+        icc_line = ''
+    return "**Random effects**\n\n" + table + icc_line
 
 NAVY = '#003f5c'    # raw data points
 TEAL = '#58a4b0'    # box fill
@@ -419,7 +443,7 @@ def _fit_one_condition_tissue_model(elements_df, condition, threshold):
     """Fits pct_above ~ tissue + (1 | patient) on ONE condition's data alone
     (Flexion and Extension are different mechanical regimes, tested as
     completely separate models - not pooled with condition as a covariate).
-    Returns (df, gm_mean, wm_mean, p_value)."""
+    Returns (df, gm_mean, wm_mean, p_value, coef_df, varcorr_df)."""
     cond_df = elements_df[elements_df['loading_condition'] == condition]
     rows = []
     for (participant, tissue), grp in cond_df.groupby(['participant', 'tissue_type']):
@@ -449,13 +473,15 @@ def _fit_one_condition_tissue_model(elements_df, condition, threshold):
         wm_mean <- as.numeric(fe1['(Intercept)'] + fe1['tissueWM'])
         p1 <- summary(model1)$coefficients['tissueWM', 'Pr(>|t|)']
         coef_df <- get_coef_df(model1)
+        varcorr_df <- get_varcorr_df(model1)
     ''')
     gm_mean, wm_mean = ro.r('gm_mean')[0], ro.r('wm_mean')[0]
     p1 = ro.r('p1')[0]
     with localconverter(ro.default_converter + pandas2ri.converter):
         coef_df = ro.conversion.rpy2py(ro.r('coef_df'))
+        varcorr_df = ro.conversion.rpy2py(ro.r('varcorr_df'))
 
-    return df, gm_mean, wm_mean, p1, coef_df
+    return df, gm_mean, wm_mean, p1, coef_df, varcorr_df
 
 
 def run_model1_lmm(elements_df, tag, title_prefix, threshold=LMM_THRESHOLD, ymax=None):
@@ -467,8 +493,10 @@ def run_model1_lmm(elements_df, tag, title_prefix, threshold=LMM_THRESHOLD, ymax
     plots, returns the Model 1 Markdown section covering both conditions."""
     results = {}
     for condition in ('Flexion', 'Extension'):
-        df, gm_mean, wm_mean, p_val, coef_df = _fit_one_condition_tissue_model(elements_df, condition, threshold)
-        results[condition] = {'df': df, 'gm_mean': gm_mean, 'wm_mean': wm_mean, 'p': p_val, 'coef_df': coef_df}
+        df, gm_mean, wm_mean, p_val, coef_df, varcorr_df = _fit_one_condition_tissue_model(
+            elements_df, condition, threshold)
+        results[condition] = {'df': df, 'gm_mean': gm_mean, 'wm_mean': wm_mean, 'p': p_val,
+                               'coef_df': coef_df, 'varcorr_df': varcorr_df}
 
         qq_path = os.path.join(OUT_DIR, 'lmm_model1_residual_qq_{}_{}.pdf'.format(tag, condition.lower()))
         ro.globalenv['model1_qq_path'] = qq_path
@@ -548,9 +576,12 @@ No difference in % of cord volume above MPS $={threshold:.2f}$ between grey and 
 matter, within {condition} ({pct_lbl}).
 
 {coef_table}
+
+{random_effects}
 """.format(condition=condition, threshold=threshold,
            pct_lbl='not pooled with Extension' if condition == 'Flexion' else 'not pooled with Flexion',
-           coef_table=r_table_to_markdown_from_df(r['coef_df'])))
+           coef_table=r_table_to_markdown_from_df(r['coef_df']),
+           random_effects=format_random_effects_md(r['varcorr_df'])))
 
     return "\n".join(sections)
 
@@ -598,9 +629,11 @@ for condition in ('Flexion', 'Extension'):
         model2 <- lmerTest::lmer(pct_above ~ tissue + region + (1 | patient), data = m2_data)
         print(summary(model2))
         coef_df2 <- get_coef_df(model2)
+        varcorr_df2 <- get_varcorr_df(model2)
     ''')
     with localconverter(ro.default_converter + pandas2ri.converter):
         coef_df2 = ro.conversion.rpy2py(ro.r('coef_df2'))
+        varcorr_df2 = ro.conversion.rpy2py(ro.r('varcorr_df2'))
 
     model2_qq_path = os.path.join(OUT_DIR, 'lmm_model2_residual_qq_preop_{}.pdf'.format(condition.lower()))
     ro.globalenv['model2_qq_path'] = model2_qq_path
@@ -634,7 +667,10 @@ factors are 2-level, so an F-test here would just be t^2 - redundant with \
 the t-tests below.
 
 {coef_table}
-""".format(condition=condition, coef_table=r_table_to_markdown_from_df(coef_df2)))
+
+{random_effects}
+""".format(condition=condition, coef_table=r_table_to_markdown_from_df(coef_df2),
+           random_effects=format_random_effects_md(varcorr_df2)))
 
 model2_section = "\n".join(model2_sections)
 
@@ -682,77 +718,92 @@ WHOLE_CORD_STATE_LABELS = {'preop-nopreload': 'PreOp (no preload)', 'postop': 'P
 
 
 def _fit_one_condition_state_model(df, condition, threshold):
-    """Fits pct_above ~ state + (1 | patient) on ONE condition's whole-cord
-    data alone (Flexion/Extension fit as completely separate models, not
-    pooled with a covariate - see run_model1_lmm's docstring for why).
-    Returns (df, pre_mean, post_mean, p_value, coef_df)."""
+    """Paired t-test (PostOp - PreOp) on ONE condition's whole-cord data
+    alone. NOT a mixed model: a prior check (5 independent optimizers +
+    profile-likelihood CI including 0) confirmed the random-intercept
+    variance here is genuinely 0, not a convergence failure - patients
+    don't keep a consistent PreOp/PostOp rank, so (1 | patient) adds
+    nothing over a plain paired comparison. Contrast with the GM/WM models,
+    where the random intercept is essential (ICC 0.87-0.97).
+    Returns (df, pre_mean, post_mean, p_value, ttest_df)."""
     cond_df = df[df['loading_condition'] == condition]
     rows = []
     for (participant, state_norm), grp in cond_df.groupby(['participant', 'state_norm']):
         rows.append({'patient': 'P{}'.format(int(participant)), 'state': WHOLE_CORD_STATE_LABELS[state_norm],
                      'pct_above': pct_above_for_subset(grp, {'t': threshold})['t']})
-    wc_df = pd.DataFrame(rows).dropna(subset=['pct_above'])
+    long_df = pd.DataFrame(rows).dropna(subset=['pct_above'])
 
-    print("--- Whole-cord data, {} (patient x state, N={}) ---".format(condition, wc_df['patient'].nunique()))
-    print(wc_df.to_string(index=False))
+    wide = long_df.pivot(index='patient', columns='state', values='pct_above')
+    common = wide.dropna().index
+    long_df = long_df[long_df['patient'].isin(common)]
+
+    print("--- Whole-cord data, {} (patient x state, N={}) ---".format(condition, len(common)))
+    print(long_df.to_string(index=False))
+
+    pre_vals = wide.loc[common, 'PreOp (no preload)'].values
+    post_vals = wide.loc[common, 'PostOp'].values
+    pre_mean, post_mean = float(pre_vals.mean()), float(post_vals.mean())
 
     with localconverter(ro.default_converter + pandas2ri.converter):
-        ro.globalenv['wc_data'] = ro.conversion.py2rpy(wc_df)
+        ro.globalenv['pre_vals'] = ro.FloatVector(pre_vals)
+        ro.globalenv['post_vals'] = ro.FloatVector(post_vals)
 
     print("")
-    print("--- Whole cord ({}): pct_above ~ state + (1 | patient) ---".format(condition))
-    # y_i = beta_0 + beta_statePostOp * 1[state_i = PostOp] + u_i + eps_i
-    # $$y_i = \beta_0 + \beta_{\text{statePostOp}}\,\mathbb{1}[\text{state}_i=\text{PostOp}] + u_i + \varepsilon_i$$
+    print("--- Whole cord ({}): paired t-test (PostOp - PreOp) ---".format(condition))
     ro.r('''
-        wc_data$patient <- factor(wc_data$patient)
-        wc_data$state   <- factor(wc_data$state, levels = c("PreOp (no preload)", "PostOp"))
-        model_wc <- lmerTest::lmer(pct_above ~ state + (1 | patient), data = wc_data)
-        print(summary(model_wc))
+        tt <- t.test(post_vals, pre_vals, paired = TRUE)
+        print(tt)
+        ttest_df <- data.frame(
+            Term = "PostOp - PreOp (no preload)", Estimate = as.numeric(tt$estimate),
+            CI_low = tt$conf.int[1], CI_high = tt$conf.int[2],
+            df = tt$parameter, t = tt$statistic, `Pr(>|t|)` = tt$p.value,
+            check.names = FALSE
+        )
     ''')
-    ro.r('''
-        fe_wc <- fixef(model_wc)
-        pre_mean  <- as.numeric(fe_wc['(Intercept)'])
-        post_mean <- as.numeric(fe_wc['(Intercept)'] + fe_wc['statePostOp'])
-        p_wc <- summary(model_wc)$coefficients['statePostOp', 'Pr(>|t|)']
-        coef_df_wc <- get_coef_df(model_wc)
-    ''')
-    pre_mean, post_mean = ro.r('pre_mean')[0], ro.r('post_mean')[0]
-    p_wc = ro.r('p_wc')[0]
+    p_val = float(ro.r('tt$p.value')[0])
     with localconverter(ro.default_converter + pandas2ri.converter):
-        coef_df = ro.conversion.rpy2py(ro.r('coef_df_wc'))
+        ttest_df = ro.conversion.rpy2py(ro.r('ttest_df'))
 
-    return wc_df, pre_mean, post_mean, p_wc, coef_df
+    return long_df, pre_mean, post_mean, p_val, ttest_df
 
 
-def run_wholecord_state_lmm(df, tag, threshold=NOPRELOAD_THRESHOLD):
-    """Fits PreOp-NoPreload vs PostOp (whole cord, not tissue-split)
-    completely separately for Flexion and Extension (two independent
-    pct_above ~ state + (1 | patient) models - see run_model1_lmm's
-    docstring for why they aren't pooled with a covariate). Saves a 2-panel
-    boxplot (Flexion left, Extension right, shared y-axis) and residual QQ
-    plots, returns the Markdown section covering both conditions."""
+def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
+    """Paired t-test, PreOp-NoPreload vs PostOp (whole cord, not tissue-
+    split), run completely separately for Flexion and Extension (see
+    run_model1_lmm's docstring for why conditions aren't pooled). Not a
+    mixed model - see _fit_one_condition_state_model's docstring for why.
+    Saves a 2-panel boxplot (Flexion left, Extension right, shared y-axis)
+    and a QQ plot of the paired differences, returns the Markdown section
+    covering both conditions."""
     df = df.copy()
     df['state_norm'] = df['state'].astype(str).str.strip().str.lower()
     df = df[df['state_norm'].isin(WHOLE_CORD_STATE_LABELS)]
 
     results = {}
     for condition in ('Flexion', 'Extension'):
-        wc_df, pre_mean, post_mean, p_val, coef_df = _fit_one_condition_state_model(df, condition, threshold)
+        wc_df, pre_mean, post_mean, p_val, ttest_df = _fit_one_condition_state_model(df, condition, threshold)
         results[condition] = {'df': wc_df, 'pre_mean': pre_mean, 'post_mean': post_mean,
-                               'p': p_val, 'coef_df': coef_df}
+                               'p': p_val, 'ttest_df': ttest_df}
 
-        qq_path = os.path.join(OUT_DIR, 'lmm_wholecord_residual_qq_{}_{}.pdf'.format(tag, condition.lower()))
+        # Paired t-test's actual assumption: the per-patient differences are
+        # ~normal - not "model residuals" (there's no model to have them).
+        wide = wc_df.pivot(index='patient', columns='state', values='pct_above')
+        diffs = (wide['PostOp'] - wide['PreOp (no preload)']).values
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            ro.globalenv['wc_diffs'] = ro.FloatVector(diffs)
+        qq_path = os.path.join(OUT_DIR, 'wholecord_ttest_diff_qq_{}_{}.pdf'.format(tag, condition.lower()))
         ro.globalenv['wc_qq_path'] = qq_path
         ro.r('''
             pdf(wc_qq_path, width = 5, height = 5)
-            qqnorm(resid(model_wc), main = "Whole-cord ({}) residual Q-Q"); qqline(resid(model_wc), col = "red")
+            qqnorm(wc_diffs, main = "Whole-cord ({}) paired-difference Q-Q"); qqline(wc_diffs, col = "red")
             dev.off()
-            cat("Whole-cord ({}) Shapiro-Wilk: "); print(shapiro.test(resid(model_wc)))
+            cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(shapiro.test(wc_diffs))
         '''.format(condition, condition))
         print("  Plot saved: {}".format(qq_path))
 
-    ymax = max(max(r['df']['pct_above'].max(), r['pre_mean'], r['post_mean'])
-               for r in results.values()) * 1.2
+    if ymax is None:
+        ymax = max(max(r['df']['pct_above'].max(), r['pre_mean'], r['post_mean'])
+                   for r in results.values()) * 1.2
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 5.5), sharey=True)
     for ax, condition in zip(axes, ('Flexion', 'Extension')):
@@ -769,6 +820,11 @@ def run_wholecord_state_lmm(df, tag, threshold=NOPRELOAD_THRESHOLD):
             for line in box[part]:
                 line.set_color('black')
                 line.set_linewidth(0.5)
+        wide = r['df'].pivot(index='patient', columns='state', values='pct_above')
+        for _, row in wide.iterrows():
+            ax.plot([0, 1], [row['PreOp (no preload)'], row['PostOp']],
+                    color='grey', linewidth=0.6, alpha=0.5, zorder=2.5)
+
         marker = CONDITION_MARKERS[condition.lower()]
         ax.scatter([0] * len(pre_vals), pre_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
         ax.scatter([1] * len(post_vals), post_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
@@ -787,12 +843,12 @@ def run_wholecord_state_lmm(df, tag, threshold=NOPRELOAD_THRESHOLD):
         ax.set_ylim(0, ymax)
 
     axes[0].set_ylabel('% of whole cord volume above threshold ({:.2f})'.format(threshold))
-    lme_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
-                          label='LME estimate')]
-    axes[0].legend(handles=lme_handle, loc='upper left', frameon=False)
+    mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
+                           label='Mean')]
+    axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
     fig.suptitle('Whole Cord: PreOp (no preload) vs PostOp')
     fig.tight_layout()
-    box_path = os.path.join(OUT_DIR, 'lmm_wholecord_boxplot_{}.pdf'.format(tag))
+    box_path = os.path.join(OUT_DIR, 'wholecord_ttest_boxplot_{}.pdf'.format(tag))
     fig.savefig(box_path, bbox_inches='tight')
     plt.close(fig)
     print("  Plot saved: {}".format(box_path))
@@ -803,40 +859,38 @@ def run_wholecord_state_lmm(df, tag, threshold=NOPRELOAD_THRESHOLD):
         sections.append("""\
 ## Whole cord ({condition}): PreOp (no preload) vs PostOp
 
-$$y_i = \\beta_0 + \\beta_{{\\text{{statePostOp}}}}\\,\\mathbb{{1}}[\\text{{state}}_i=\\text{{PostOp}}] + u_i + \\varepsilon_i$$
-
-- $y_i$: `pct_above` (whole cord, not split by tissue) for patient $i$, {condition} only
-- $\\beta_0$: intercept - expected `pct_above` for PreOp (no preload) (the reference level)
-- $\\beta_{{\\text{{statePostOp}}}}$: fixed effect of PostOp vs PreOp (no preload)
-- $u_i \\sim \\mathcal{{N}}(0,\\tau^2)$: random intercept per patient
-- $\\varepsilon_i \\sim \\mathcal{{N}}(0,\\sigma^2)$: residual error
-
-`lmer(pct_above ~ state + (1 | patient))`, {condition} data only
-
-$$H_0:\\ \\beta_{{\\text{{statePostOp}}}} = 0$$
+$$H_0:\\ \\mu_{{\\Delta}} = 0, \\quad \\Delta_i = \\text{{pct\\_above}}_{{i,\\text{{PostOp}}}} - \\text{{pct\\_above}}_{{i,\\text{{PreOp}}}}$$
 
 No difference in % of whole cord volume above MPS $={threshold:.2f}$ between PreOp \
-(no preload) and PostOp, within {condition}.
+(no preload) and PostOp, within {condition}. Paired t-test on each patient's \
+PostOp-minus-PreOp difference ({condition} only) - see the note above on why \
+this isn't a mixed model.
 
 {coef_table}
-""".format(condition=condition, threshold=threshold, coef_table=r_table_to_markdown_from_df(r['coef_df'])))
+""".format(condition=condition, threshold=threshold, coef_table=r_table_to_markdown_from_df(r['ttest_df'])))
 
     return "\n".join(sections)
 
 
 print("")
-print("=== Linear mixed-effects model: Whole cord, PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(
-    NOPRELOAD_THRESHOLD))
+print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(NOPRELOAD_THRESHOLD))
 WHOLE_CORD_CACHE_PATH = os.path.join(OUT_DIR, 'cache_prepost_sortedbymjoachange_peak.csv')
 whole_cord_df = pd.read_csv(WHOLE_CORD_CACHE_PATH)
-wholecord_section = run_wholecord_state_lmm(whole_cord_df, 'prepost')
+wholecord_section = run_wholecord_ttest(whole_cord_df, 'prepost', ymax=70)
+
+WHOLECORD_PREAMBLE = """\
+Paired t-test, not a mixed model: the random-intercept variance here is \
+genuinely 0 (confirmed via 5 optimizers + profile-likelihood CI), since \
+patients don't keep a consistent PreOp/PostOp rank - unlike the GM/WM \
+models, where it's essential (ICC 0.87-0.97). Flexion/Extension kept as \
+separate tests, not pooled.
+"""
 
 summary_md_wholecord = (
-    "# Whole-cord linear mixed-effects model - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(
-        NOPRELOAD_THRESHOLD)
-    + PREAMBLE + "\n" + wholecord_section
+    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    + WHOLECORD_PREAMBLE + "\n" + wholecord_section
 )
-summary_md_wholecord_path = os.path.join(OUT_DIR, 'lmm_summary_wholecord_prepost.md')
+summary_md_wholecord_path = os.path.join(OUT_DIR, 'ttest_summary_wholecord_prepost.md')
 with open(summary_md_wholecord_path, 'w', encoding='utf-8') as f:
     f.write(summary_md_wholecord)
 print("")

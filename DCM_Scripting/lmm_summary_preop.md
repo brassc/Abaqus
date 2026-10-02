@@ -23,6 +23,15 @@ No difference in % of cord volume above MPS $=0.10$ between grey and white matte
 | (Intercept) | 14.21 | 3.605 | 11.8 | 3.942 | 0.002018 |
 | tissueWM | 6.986 | 1.354 | 11 | 5.159 | 0.0003138 |
 
+**Random effects**
+
+| Group | Variance | Std.Dev. |
+|---|---|---|
+| patient | 144.9 | 12.04 |
+| Residual | 11 | 3.317 |
+
+**ICC = 0.929**
+
 ## Model 1 (Extension): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
@@ -43,6 +52,15 @@ No difference in % of cord volume above MPS $=0.10$ between grey and white matte
 |---|---|---|---|---|---|
 | (Intercept) | 13.05 | 3.713 | 11.3 | 3.515 | 0.004649 |
 | tissueWM | 3.649 | 0.8668 | 11 | 4.21 | 0.00146 |
+
+**Random effects**
+
+| Group | Variance | Std.Dev. |
+|---|---|---|
+| patient | 160.9 | 12.69 |
+| Residual | 4.508 | 2.123 |
+
+**ICC = 0.973**
 
 ## Model 2 (Flexion): GM vs WM, boundary vs interior
 
@@ -67,6 +85,15 @@ No difference in % of cord volume above MPS $=0.10$ between grey and white matte
 | tissueWM | 7.364 | 0.9685 | 33.02 | 7.604 | 9.443e-09 |
 | regionInterior | -0.5217 | 0.9685 | 33.02 | -0.5387 | 0.5937 |
 
+**Random effects**
+
+| Group | Variance | Std.Dev. |
+|---|---|---|
+| patient | 149.2 | 12.21 |
+| Residual | 10.94 | 3.307 |
+
+**ICC = 0.932**
+
 ## Model 2 (Extension): GM vs WM, boundary vs interior
 
 $$y_{ijk} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ijk}=\text{WM}] + \beta_{\text{regionInterior}}\,\mathbb{1}[\text{region}_{ijk}=\text{Interior}] + u_i + \varepsilon_{ijk}$$
@@ -89,3 +116,12 @@ No difference in % of cord volume above MPS $=0.10$ between grey and white matte
 | (Intercept) | 12.93 | 3.724 | 11.36 | 3.474 | 0.004971 |
 | tissueWM | 3.955 | 0.6742 | 33.01 | 5.865 | 1.433e-06 |
 | regionInterior | -0.01646 | 0.6742 | 33.01 | -0.02441 | 0.9807 |
+
+**Random effects**
+
+| Group | Variance | Std.Dev. |
+|---|---|---|
+| patient | 162.4 | 12.74 |
+| Residual | 5.3 | 2.302 |
+
+**ICC = 0.968**
