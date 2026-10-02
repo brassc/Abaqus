@@ -14,6 +14,7 @@ Run: python plot_gm_wm_boundary_enrichment.py
 """
 
 import os
+import sys
 from collections import defaultdict
 
 import pandas as pd
@@ -327,6 +328,21 @@ preop_elements, preop_summary = run_dataset(
     id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
                         'loading_condition': str(row['loading_condition']).strip()})
 
+# TEMPORARY: PreOp-NoPreload extraction isn't done yet (run_dataset would spend
+# a long time checking 24 jobs' files, all missing). Uncomment once it's run.
+preop_nopreload_elements = pd.DataFrame()
+# print("")
+# print("=== PreOp (no preload) ===")
+# preop_nopreload_rows = id_map[
+#     (id_map['State'].astype(str).str.strip().str.lower() == 'preop-nopreload') &
+#     (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+# ]
+# preop_nopreload_elements, preop_nopreload_summary = run_dataset(
+#     preop_nopreload_rows, PREOP_THRESHOLDS, 'preop_nopreload', 'PreOp (no preload)',
+#     has_condition=True,
+#     id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
+#                         'loading_condition': str(row['loading_condition']).strip()})
+
 # print("")
 # print("=== Oscillation ===")
 # osc_rows = id_map[id_map['loading_condition'].astype(str).str.strip().str.lower() == 'oscillation']
@@ -339,11 +355,10 @@ preop_elements, preop_summary = run_dataset(
 # Linear mixed-effects tests (R's lme4/lmerTest via rpy2 - Satterthwaite
 # t-tests, not the asymptotic z-tests statsmodels gives). Patient is a
 # random intercept; loading_condition is averaged out first rather than
-# modeled, to keep covariates minimal at N=12. PreOp, threshold=0.10 only.
+# modeled, to keep covariates minimal at N=12. Threshold=0.10 only.
+# Run once for PreOp (with preload, Model 1 + Model 2) and once for PreOp
+# no preload (Model 1 only).
 # ============================================================
-print("")
-print("=== Linear mixed-effects models (PreOp, threshold=0.10) ===")
-
 LMM_THRESHOLD = 0.10
 
 os.environ.setdefault('R_HOME', r'C:\Program Files\R\R-4.6.1')
@@ -358,134 +373,7 @@ from rpy2.robjects.packages import importr
 importr('lme4')
 importr('lmerTest')
 
-# Model 1 data: tissue only (ignores region), averaged over loading_condition.
-m1_rows = []
-for (participant, tissue), grp in preop_elements.groupby(['participant', 'tissue_type']):
-    per_condition = [pct_above_for_subset(g, {'t': LMM_THRESHOLD})['t'] for _, g in grp.groupby('loading_condition')]
-    m1_rows.append({'patient': participant, 'tissue': tissue,
-                     'pct_above': sum(per_condition) / len(per_condition)})
-m1_df = pd.DataFrame(m1_rows).dropna(subset=['pct_above'])
 
-# Model 2 data: tissue x region, from the summary table already built above,
-# averaged over loading_condition.
-m2_df = (preop_summary[preop_summary['threshold'] == 't0p10']
-         .groupby(['participant', 'tissue', 'region'])['pct_above'].mean()
-         .reset_index().rename(columns={'participant': 'patient'})
-         .dropna(subset=['pct_above']))
-
-print("--- Model 1 data (patient x tissue, N={}) ---".format(m1_df['patient'].nunique()))
-print(m1_df.to_string(index=False))
-print("")
-print("--- Model 2 data (patient x tissue x region, N={}) ---".format(m2_df['patient'].nunique()))
-print(m2_df.to_string(index=False))
-
-with localconverter(ro.default_converter + pandas2ri.converter):
-    ro.globalenv['m1_data'] = ro.conversion.py2rpy(m1_df)
-    ro.globalenv['m2_data'] = ro.conversion.py2rpy(m2_df)
-
-print("")
-print("--- Model 1: pct_above ~ tissue + (1 | patient) ---")
-# y_ij = beta_0 + beta_tissueWM * 1[tissue_ij = WM] + u_i + eps_ij
-# $$y_{ij} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ij}=\text{WM}] + u_i + \varepsilon_{ij}$$
-ro.r('''
-    m1_data$patient <- factor(m1_data$patient)
-    m1_data$tissue  <- factor(m1_data$tissue)
-    model1 <- lmerTest::lmer(pct_above ~ tissue + (1 | patient), data = m1_data)
-    print(summary(model1))
-''')
-
-# Box plot of raw per-patient GM/WM values (paired lines, since each patient
-# has both) with the LME's estimated means overlaid.
-ro.r('''
-    fe1 <- fixef(model1)
-    gm_mean <- as.numeric(fe1['(Intercept)'])
-    wm_mean <- as.numeric(fe1['(Intercept)'] + fe1['tissueWM'])
-    p1 <- summary(model1)$coefficients['tissueWM', 'Pr(>|t|)']
-''')
-gm_mean, wm_mean = ro.r('gm_mean')[0], ro.r('wm_mean')[0]
-p1 = ro.r('p1')[0]
-p1_label = 'p < 0.001' if p1 < 0.001 else 'p = {:.3f}'.format(p1)
-
-gm_vals = m1_df[m1_df['tissue'] == 'GM'].set_index('patient')['pct_above']
-wm_vals = m1_df[m1_df['tissue'] == 'WM'].set_index('patient')['pct_above']
-
-NAVY = '#003f5c'    # raw data points
-TEAL = '#58a4b0'    # box fill
-
-fig, ax = plt.subplots(figsize=(5, 5.5))
-box = ax.boxplot([gm_vals.values, wm_vals.values], positions=[0, 1], widths=0.35,
-                  showfliers=False, patch_artist=True, zorder=2)
-for patch in box['boxes']:
-    patch.set_facecolor(to_rgba(TEAL, 0.4))
-    patch.set_edgecolor('black')
-    patch.set_linewidth(0.5)
-for part in ('whiskers', 'caps', 'medians'):
-    for line in box[part]:
-        line.set_color('black')
-        line.set_linewidth(0.5)
-for patient in gm_vals.index:
-    ax.plot([0, 1], [gm_vals[patient], wm_vals[patient]], color='lightgray', linewidth=0.3, alpha=0.6, zorder=1)
-ax.scatter([0] * len(gm_vals), gm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
-ax.scatter([1] * len(wm_vals), wm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
-ax.scatter([0, 1], [gm_mean, wm_mean], marker='d', s=80, facecolor='red',
-           edgecolor='black', linewidth=1.5, zorder=5, label='LME estimate')
-
-bracket_y, tick = 58, 1.5
-ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
-        color='black', linewidth=1.2, zorder=6)
-ax.text(0.5, bracket_y + 1, p1_label, ha='center', va='bottom', fontsize=10)
-
-ax.set_xticks([0, 1])
-ax.set_xticklabels(['GM', 'WM'])
-ax.set_ylabel('% of tissue volume above threshold (0.10)')
-ax.set_title('PreOp with Preload: Grey Matter vs. White Matter')
-ax.set_ylim(0, 70)
-ax.legend(loc='upper left', frameon=False)
-fig.tight_layout()
-model1_box_path = os.path.join(OUT_DIR, 'lmm_model1_boxplot.pdf')
-fig.savefig(model1_box_path, bbox_inches='tight')
-plt.close(fig)
-print("  Plot saved: {}".format(model1_box_path))
-
-print("")
-print("--- Model 2: pct_above ~ tissue + region + (1 | patient) ---")
-# y_ijk = beta_0 + beta_tissueWM * 1[tissue=WM] + beta_regionInterior * 1[region=Interior] + u_i + eps_ijk
-# $$y_{ijk} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ijk}=\text{WM}] + \beta_{\text{regionInterior}}\,\mathbb{1}[\text{region}_{ijk}=\text{Interior}] + u_i + \varepsilon_{ijk}$$
-ro.r('''
-    m2_data$patient <- factor(m2_data$patient)
-    m2_data$tissue  <- factor(m2_data$tissue)
-    m2_data$region  <- factor(m2_data$region)
-    model2 <- lmerTest::lmer(pct_above ~ tissue + region + (1 | patient), data = m2_data)
-    print(summary(model2))
-''')
-
-# Residual diagnostics - t-test validity leans more on normality at N=12.
-model1_qq_path = os.path.join(OUT_DIR, 'lmm_model1_residual_qq.pdf')
-model2_qq_path = os.path.join(OUT_DIR, 'lmm_model2_residual_qq.pdf')
-ro.globalenv['model1_qq_path'] = model1_qq_path
-ro.globalenv['model2_qq_path'] = model2_qq_path
-
-print("")
-print("--- Residual diagnostics ---")
-ro.r('''
-    pdf(model1_qq_path, width = 5, height = 5)
-    qqnorm(resid(model1), main = "Model 1 residual Q-Q"); qqline(resid(model1), col = "red")
-    dev.off()
-
-    pdf(model2_qq_path, width = 5, height = 5)
-    qqnorm(resid(model2), main = "Model 2 residual Q-Q"); qqline(resid(model2), col = "red")
-    dev.off()
-
-    cat("Model 1 Shapiro-Wilk: "); print(shapiro.test(resid(model1)))
-    cat("Model 2 Shapiro-Wilk: "); print(shapiro.test(resid(model2)))
-''')
-print("  Plot saved: {}".format(model1_qq_path))
-print("  Plot saved: {}".format(model2_qq_path))
-
-
-# ============================================================
-# Markdown summary (Obsidian-ready: $...$/$$...$$ math, pipe tables).
-# ============================================================
 def r_table_to_markdown(r_expr):
     """Evaluates an R expression returning a data.frame with a 'Term'
     column, and renders it as a GitHub/Obsidian-style Markdown table.
@@ -513,15 +401,100 @@ ro.r('''
     }
 ''')
 
-summary_md = """\
-# GM/WM linear mixed-effects models (PreOp, threshold = 0.10)
+NAVY = '#003f5c'    # raw data points
+TEAL = '#58a4b0'    # box fill
 
-Patient is a random intercept; loading condition averaged out beforehand \
-(not modeled) to keep covariates minimal at N=12. Satterthwaite-df t-tests \
-(R `lme4`/`lmerTest`), not asymptotic z. `tissue` and `region` are both \
-2-level factors, so their F-tests would just be t^2 - the t-tests below \
-are the whole story.
 
+def run_model1_lmm(elements_df, tag, title_prefix):
+    """Fits pct_above ~ tissue + (1 | patient) on elements_df, saves its
+    boxplot and residual QQ plot, and returns the Model 1 Markdown section
+    (equation/H0/coefficient table) for this dataset."""
+    m1_rows = []
+    for (participant, tissue), grp in elements_df.groupby(['participant', 'tissue_type']):
+        per_condition = [pct_above_for_subset(g, {'t': LMM_THRESHOLD})['t'] for _, g in grp.groupby('loading_condition')]
+        m1_rows.append({'patient': participant, 'tissue': tissue,
+                         'pct_above': sum(per_condition) / len(per_condition)})
+    m1_df = pd.DataFrame(m1_rows).dropna(subset=['pct_above'])
+
+    print("--- Model 1 data (patient x tissue, N={}) ---".format(m1_df['patient'].nunique()))
+    print(m1_df.to_string(index=False))
+
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['m1_data'] = ro.conversion.py2rpy(m1_df)
+
+    print("")
+    print("--- Model 1: pct_above ~ tissue + (1 | patient) ---")
+    # y_ij = beta_0 + beta_tissueWM * 1[tissue_ij = WM] + u_i + eps_ij
+    # $$y_{ij} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ij}=\text{WM}] + u_i + \varepsilon_{ij}$$
+    ro.r('''
+        m1_data$patient <- factor(m1_data$patient)
+        m1_data$tissue  <- factor(m1_data$tissue)
+        model1 <- lmerTest::lmer(pct_above ~ tissue + (1 | patient), data = m1_data)
+        print(summary(model1))
+    ''')
+
+    # Box plot of raw per-patient GM/WM values (paired lines, since each
+    # patient has both) with the LME's estimated means overlaid.
+    ro.r('''
+        fe1 <- fixef(model1)
+        gm_mean <- as.numeric(fe1['(Intercept)'])
+        wm_mean <- as.numeric(fe1['(Intercept)'] + fe1['tissueWM'])
+        p1 <- summary(model1)$coefficients['tissueWM', 'Pr(>|t|)']
+    ''')
+    gm_mean, wm_mean = ro.r('gm_mean')[0], ro.r('wm_mean')[0]
+    p1 = ro.r('p1')[0]
+    p1_label = 'p < 0.001' if p1 < 0.001 else 'p = {:.3f}'.format(p1)
+
+    gm_vals = m1_df[m1_df['tissue'] == 'GM'].set_index('patient')['pct_above']
+    wm_vals = m1_df[m1_df['tissue'] == 'WM'].set_index('patient')['pct_above']
+
+    fig, ax = plt.subplots(figsize=(5, 5.5))
+    box = ax.boxplot([gm_vals.values, wm_vals.values], positions=[0, 1], widths=0.35,
+                      showfliers=False, patch_artist=True, zorder=2)
+    for patch in box['boxes']:
+        patch.set_facecolor(to_rgba(TEAL, 0.4))
+        patch.set_edgecolor('black')
+        patch.set_linewidth(0.5)
+    for part in ('whiskers', 'caps', 'medians'):
+        for line in box[part]:
+            line.set_color('black')
+            line.set_linewidth(0.5)
+    for patient in gm_vals.index:
+        ax.plot([0, 1], [gm_vals[patient], wm_vals[patient]], color='lightgray', linewidth=0.3, alpha=0.6, zorder=1)
+    ax.scatter([0] * len(gm_vals), gm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
+    ax.scatter([1] * len(wm_vals), wm_vals.values, color=NAVY, s=25, alpha=0.7, zorder=3)
+    ax.scatter([0, 1], [gm_mean, wm_mean], marker='d', s=80, facecolor='red',
+               edgecolor='black', linewidth=1.5, zorder=5, label='LME estimate')
+
+    bracket_y, tick = 58, 1.5
+    ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+            color='black', linewidth=1.2, zorder=6)
+    ax.text(0.5, bracket_y + 1, p1_label, ha='center', va='bottom', fontsize=10)
+
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(['GM', 'WM'])
+    ax.set_ylabel('% of tissue volume above threshold (0.10)')
+    ax.set_title('{}: Grey Matter vs. White Matter'.format(title_prefix))
+    ax.set_ylim(0, 70)
+    ax.legend(loc='upper left', frameon=False)
+    fig.tight_layout()
+    box_path = os.path.join(OUT_DIR, 'lmm_model1_boxplot_{}.pdf'.format(tag))
+    fig.savefig(box_path, bbox_inches='tight')
+    plt.close(fig)
+    print("  Plot saved: {}".format(box_path))
+
+    # Residual diagnostics - t-test validity leans more on normality at N=12.
+    qq_path = os.path.join(OUT_DIR, 'lmm_model1_residual_qq_{}.pdf'.format(tag))
+    ro.globalenv['model1_qq_path'] = qq_path
+    ro.r('''
+        pdf(model1_qq_path, width = 5, height = 5)
+        qqnorm(resid(model1), main = "Model 1 residual Q-Q"); qqline(resid(model1), col = "red")
+        dev.off()
+        cat("Model 1 Shapiro-Wilk: "); print(shapiro.test(resid(model1)))
+    ''')
+    print("  Plot saved: {}".format(qq_path))
+
+    return """\
 ## Model 1: GM vs WM
 
 $$y_{{ij}} = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_{{ij}}=\\text{{WM}}] + u_i + \\varepsilon_{{ij}}$$
@@ -539,7 +512,57 @@ $$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0$$
 No difference in % of cord volume above MPS $=0.10$ between grey and white matter.
 
 {model1_coef}
+""".format(model1_coef=r_table_to_markdown('get_coef_df(model1)'))
 
+
+PREAMBLE = """\
+Patient is a random intercept; loading condition averaged out beforehand \
+(not modeled) to keep covariates minimal at N=12. Satterthwaite-df t-tests \
+(R `lme4`/`lmerTest`), not asymptotic z.
+"""
+
+# --- PreOp (with preload): Model 1 + Model 2 ---
+print("")
+print("=== Linear mixed-effects models: PreOp (with preload), threshold=0.10 ===")
+model1_section_preop = run_model1_lmm(preop_elements, 'preop', 'PreOp with Preload')
+
+# Model 2 data: tissue x region, from the summary table already built above,
+# averaged over loading_condition.
+m2_df = (preop_summary[preop_summary['threshold'] == 't0p10']
+         .groupby(['participant', 'tissue', 'region'])['pct_above'].mean()
+         .reset_index().rename(columns={'participant': 'patient'})
+         .dropna(subset=['pct_above']))
+
+print("")
+print("--- Model 2 data (patient x tissue x region, N={}) ---".format(m2_df['patient'].nunique()))
+print(m2_df.to_string(index=False))
+
+with localconverter(ro.default_converter + pandas2ri.converter):
+    ro.globalenv['m2_data'] = ro.conversion.py2rpy(m2_df)
+
+print("")
+print("--- Model 2: pct_above ~ tissue + region + (1 | patient) ---")
+# y_ijk = beta_0 + beta_tissueWM * 1[tissue=WM] + beta_regionInterior * 1[region=Interior] + u_i + eps_ijk
+# $$y_{ijk} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ijk}=\text{WM}] + \beta_{\text{regionInterior}}\,\mathbb{1}[\text{region}_{ijk}=\text{Interior}] + u_i + \varepsilon_{ijk}$$
+ro.r('''
+    m2_data$patient <- factor(m2_data$patient)
+    m2_data$tissue  <- factor(m2_data$tissue)
+    m2_data$region  <- factor(m2_data$region)
+    model2 <- lmerTest::lmer(pct_above ~ tissue + region + (1 | patient), data = m2_data)
+    print(summary(model2))
+''')
+
+model2_qq_path = os.path.join(OUT_DIR, 'lmm_model2_residual_qq_preop.pdf')
+ro.globalenv['model2_qq_path'] = model2_qq_path
+ro.r('''
+    pdf(model2_qq_path, width = 5, height = 5)
+    qqnorm(resid(model2), main = "Model 2 residual Q-Q"); qqline(resid(model2), col = "red")
+    dev.off()
+    cat("Model 2 Shapiro-Wilk: "); print(shapiro.test(resid(model2)))
+''')
+print("  Plot saved: {}".format(model2_qq_path))
+
+model2_section = """\
 ## Model 2: GM vs WM, boundary vs interior
 
 $$y_{{ijk}} = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_{{ijk}}=\\text{{WM}}] + \\beta_{{\\text{{regionInterior}}}}\\,\\mathbb{{1}}[\\text{{region}}_{{ijk}}=\\text{{Interior}}] + u_i + \\varepsilon_{{ijk}}$$
@@ -556,19 +579,40 @@ $$y_{{ijk}} = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{t
 $$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0 \\ \\text{{and}} \\ \\beta_{{\\text{{regionInterior}}}} = 0$$
 
 No difference in % of cord volume above MPS $=0.10$ between grey and white \
-matter, or between boundary and interior tissue.
+matter, or between boundary and interior tissue. `tissue` and `region` are \
+both 2-level factors, so an F-test here would just be t^2 - redundant with \
+the t-test above.
 
 {model2_coef}
-""".format(
-    model1_coef=r_table_to_markdown('get_coef_df(model1)'),
-    model2_coef=r_table_to_markdown('get_coef_df(model2)'),
+""".format(model2_coef=r_table_to_markdown('get_coef_df(model2)'))
+
+summary_md_preop = (
+    "# GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)\n\n"
+    + PREAMBLE + "\n" + model1_section_preop + "\n" + model2_section
 )
-
-summary_md_path = os.path.join(OUT_DIR, 'lmm_summary.md')
-with open(summary_md_path, 'w', encoding='utf-8') as f:
-    f.write(summary_md)
-
+summary_md_preop_path = os.path.join(OUT_DIR, 'lmm_summary_preop.md')
+with open(summary_md_preop_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_preop)
 print("")
-print("--- Markdown summary (Obsidian-ready) ---")
-print(summary_md)
-print("Summary saved: {}".format(summary_md_path))
+print("Summary saved: {}".format(summary_md_preop_path))
+
+# TEMPORARY: PreOp-NoPreload extraction isn't done yet, so preop_nopreload_elements
+# is empty - run_model1_lmm would crash on it (empty groupby -> no 'tissue' column).
+# Remove this once that extraction has been run.
+if preop_nopreload_elements.empty:
+    sys.exit("Stopping before PreOp-NoPreload LMM - no extracted data yet.")
+
+# --- PreOp (no preload): Model 1 only ---
+print("")
+print("=== Linear mixed-effects models: PreOp (no preload), threshold=0.10 ===")
+model1_section_nopreload = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload', 'PreOp without Preload')
+
+summary_md_nopreload = (
+    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = 0.10)\n\n"
+    + PREAMBLE + "\n" + model1_section_nopreload
+)
+summary_md_nopreload_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload.md')
+with open(summary_md_nopreload_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_nopreload)
+print("")
+print("Summary saved: {}".format(summary_md_nopreload_path))
