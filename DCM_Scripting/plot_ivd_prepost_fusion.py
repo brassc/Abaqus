@@ -1,52 +1,13 @@
 """
-plot_ivd_prepost_fusion.py - Compare intervertebral disc (IVD) strain between
-PreOp-NoPreload and PostOp, to evaluate the effect of fusion surgery on the
-IVD (adjacent-segment strain is a known fusion concern - does fusing levels
-push more strain into the IVD, vs. decompression-only?).
+plot_ivd_prepost_fusion.py - % IVD volume above T95, PreOp-NoPreload vs
+PostOp, per patient/condition, fusion patients highlighted. Two threshold
+versions, both plotted: global (cohort-pooled) and patientwise (per-patient,
+2nd y-axis shows each patient's own threshold).
 
-Metric: % IVD volume above threshold, using a FIXED, COHORT-POOLED threshold
-per percentile - T90/T95/T97/T99 are each computed ONCE from every patient's,
-every condition's, every state's element data pooled together
-(mps_common.volume_weighted_percentile applied to the whole pooled cache),
-giving one shared MPS cutoff per percentile. Each patient/condition/state's
-value is then % of ITS OWN volume exceeding that SAME shared cutoff
-(mps_common.pct_volume_above) - same convention as the original Cord analysis
-in "Alex_results_multipatient_plot - compare_threshold.py"'s first plot
-(T90/T95/T99 pooled across the whole cohort, then % volume above per patient).
+Reads '_ivd_mps.csv' via id_map.csv's csv_path. Caches peak-reduced data to
+cache_ivd_prepost_peak.csv.
 
-This replaces an earlier version of this script that computed each
-percentile independently PER job (per patient/condition/state) rather than
-pooling first - that gave each state its own, different MPS cutoff by
-construction, which couldn't answer "did more volume cross a shared
-threshold after surgery" (the cutoff itself moved between states, not just
-the volume above it). Pooling first, then measuring against one fixed value,
-is what makes PreOp vs PostOp comparable at all.
-
-A patient-specific-but-state-pooled threshold (pool only that one patient's
-PreOp+PostOp data, not the whole cohort) is a plausible alternative if
-individual baseline IVD strain varies enough across patients to wash out
-patient-specific signal under one cohort-wide cutoff - not implemented here,
-flagged for later if the cohort-pooled version doesn't show anything useful.
-
-Color = percentile, marker shape = loading condition (Flexion square,
-Extension triangle), fill = state (PreOp-NoPreload solid, PostOp hollow), x
-ordered by change in mJOA (postop - preop, ascending), fusion patients (P1,
-P5, P7, P8) shaded orange across the whole column - same convention as
-plot_prepost_sortedbymjoachange.py's combined single-row plot. The raw peak
-is still saved in the summary CSV for reference, just not plotted.
-
-Reads '_ivd_mps.csv' (from Alex_results_extraction_IVD.py), derived from
-id_map.csv's existing 'csv_path' column by suffix swap (csv_path.replace(
-'_mps.csv', '_ivd_mps.csv')) - same convention '_topology.csv' already uses
-elsewhere in this codebase. As of this script's creation, IVD extraction is
-still in progress (4 PostOp jobs - N01-011 and N01-017, both conditions -
-pending an Abaqus-version fix), so this script will report those as
-missing/skipped rather than failing outright; re-run once extraction for them
-completes.
-
-Caches the reduced per-element (mps, volume) data (element-wise peak over all
-frames) to cache_ivd_prepost_peak.csv, so a later %-above-threshold plot can
-reuse it without re-reading the raw '_ivd_mps.csv' files.
+Outputs: 2 summary CSVs, 2 PDF plots, 1 markdown table (fusion patients) to stdout.
 
 Run: python plot_ivd_prepost_fusion.py
 """
@@ -72,11 +33,7 @@ STATE_FILLED = {STATE_PREOP: True, STATE_POSTOP: False}   # solid vs hollow mark
 
 CONDITION_MARKERS = {'flexion': 's', 'extension': '^'}
 
-# T90/T97/T99 commented out (not deleted) - only T95 (global and patientwise)
-# is of interest right now. Everything downstream (COHORT_THRESHOLDS,
-# PATIENT_THRESHOLDS, the summary tables, and the per-percentile plot loop)
-# is driven entirely by this dict, so restricting it to T95 is the only
-# change needed to limit the whole script to T95 only.
+# T90/T97/T99 commented out, not deleted - everything downstream reads this dict.
 PERCENTILES = {
     # 't90': 0.90,
     't95': 0.95,
@@ -90,8 +47,7 @@ PERCENTILE_COLORS = {
     # 't99': '#7030a0',
 }
 
-# Fusion patients - shaded orange across the whole column (both states), same
-# convention as plot_prepost_sortedbymjoachange.py's combined single-row plot.
+# Shaded orange across the whole column in every plot.
 FUSION_PARTICIPANTS = {'P1', 'P5', 'P7', 'P8'}
 # ============================================================
 
@@ -136,14 +92,8 @@ else:
             missing.append((participant, condition, state))
             continue
         raw = pd.read_csv(ivd_csv_path)
-        # Completeness check: Alex_results_extraction_IVD.py opens the file in
-        # 'w' mode and writes rows in a loop, so a file read WHILE extraction
-        # is still running is a clean-but-truncated read (fewer complete rows,
-        # not a parse error) - pandas wouldn't raise, it would just silently
-        # understate peak/percentile strain. id_map.csv's 'last_frame_idx'
-        # column (from the original Cord extraction, same ODB/step, so same
-        # frame count) lets us catch this: if the IVD file's last frame_index
-        # doesn't reach it, extraction for this job isn't finished yet.
+        # Catches a file still being written (truncated, not a parse error) -
+        # compare against id_map.csv's 'last_frame_idx' from the Cord extraction.
         expected_last_frame = row.get('last_frame_idx', None)
         if expected_last_frame not in (None, '') and not pd.isna(expected_last_frame):
             if raw['frame_index'].max() < int(expected_last_frame):
@@ -172,7 +122,7 @@ else:
     print("Cached reduced data: {}".format(own_cache_path))
 
 # ============================================================
-# mJOA change ordering - same convention as plot_prepost_sortedbymjoachange.py
+# mJOA change ordering (x-axis)
 # ============================================================
 preop_mjoa_by_participant = {}
 for _, row in id_map.iterrows():
@@ -199,19 +149,14 @@ for p_label, preop_val in preop_mjoa_by_participant.items():
         continue
 
 # ============================================================
-# Cohort-pooled thresholds - computed ONCE from every patient/condition/state's
-# element data pooled together, not per job. This is the fixed MPS cutoff each
-# job's volume is measured against below.
+# Cohort-pooled thresholds - one shared cutoff per percentile, pooled across all patients.
 # ============================================================
 COHORT_THRESHOLDS = {name: volume_weighted_percentile(cache_df, p=p) for name, p in PERCENTILES.items()}
 print("Cohort-pooled thresholds: " + "  ".join(
     "{}={:.4f}".format(name.upper(), val) for name, val in COHORT_THRESHOLDS.items()))
 
 # ============================================================
-# Summary: % IVD volume above each cohort-pooled threshold, per
-# participant/condition/state - plus the raw peak, kept for reference only
-# (one row per participant/condition/state, not per percentile, since it
-# doesn't depend on p).
+# Summary: % IVD volume above each cohort-pooled threshold, per job. Raw peak kept for reference.
 # ============================================================
 records = []
 peak_records = []
@@ -245,14 +190,7 @@ participants = sorted(summary['participant'].unique(),
 x_pos = {p: i for i, p in enumerate(participants)}
 
 # ============================================================
-# Plot: one SEPARATE figure per percentile (not one combined multi-color
-# plot - with 4 percentiles x 2 states x 2 conditions all overlaid, individual
-# patients like P1 were hard to pick out). Each figure: marker shape = loading
-# condition, fill = state (PreOp-NoPreload solid, PostOp hollow), fusion
-# patients shaded orange across the whole column, x ordered by mJOA change.
-# Same per-threshold-figure pattern already used elsewhere in this codebase
-# (see "Alex_results_multipatient_plot - compare_threshold.py"'s per-patient
-# blob-distribution plots).
+# Plot: one figure per percentile. Marker shape = condition, fill = state.
 # ============================================================
 from matplotlib.patches import Patch
 
@@ -323,22 +261,8 @@ for p in plot_paths:
     print("Plot saved: {}".format(p))
 
 # ============================================================
-# Patient-wise version: instead of one cohort-pooled threshold shared by
-# everyone, each patient gets their OWN threshold - pooling that one
-# patient's PreOp-NoPreload + PostOp data (both conditions) together. This is
-# the "patient-specific-but-state-pooled" alternative flagged in the
-# docstring above: still comparable PreOp vs PostOp WITHIN a patient (same
-# fixed cutoff both times), but no longer forces every patient to be judged
-# against one shared cohort-wide cutoff - useful if baseline IVD strain
-# varies enough across patients that a cohort threshold would sit miles
-# above some patients' whole distribution and miles below others'.
-#
-# Separate output files (same plots, '_patientwise' suffix) - not a
-# replacement for the cohort-pooled plots above, a second thing to compare
-# against them. Reuses cache_df, mjoa_delta_by_participant,
-# PERCENTILES/PERCENTILE_COLORS, CONDITION_MARKERS, STATE_FILLED,
-# FUSION_PARTICIPANTS, all_handles, OUT_DIR, Line2D, pd, plt, os already
-# loaded/defined above - does not modify anything above this point.
+# Patient-wise version: each patient's own threshold, pooled from their own
+# PreOp-NoPreload + PostOp data. Separate output files ('_patientwise' suffix).
 # ============================================================
 PATIENT_THRESHOLDS = {}
 for participant, pgrp in cache_df.groupby('participant'):
@@ -403,6 +327,8 @@ for name, p in PERCENTILES.items():
             xp = x_pos[fusion_p]
             ax.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
 
+    # Starts at 0 explicitly - matplotlib's autoscale otherwise pads slightly below 0.
+    ax.set_ylim(bottom=0)
     ax.set_xticks(range(len(participants)))
     ax.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in participants])
     ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
@@ -421,24 +347,84 @@ for name, p in PERCENTILES.items():
     plt.close(fig)
     pw_plot_paths.append(pw_plot_path)
 
+    # --- Separate figure: same plot plus a second y-axis showing each
+    # patient's own threshold value, saved to a distinct '_w_thresholds' file.
+    fig2, ax2 = plt.subplots(figsize=(9, 5.5))
+
+    for participant, grp in col_df.groupby('participant'):
+        for state, state_grp in grp.groupby('state'):
+            if len(state_grp) == 2:
+                xp = x_pos[participant]
+                ax2.vlines(xp, state_grp['pct_above'].min(), state_grp['pct_above'].max(),
+                           color=color, linewidth=1.0, alpha=0.5, zorder=2)
+    for (condition, state), grp in col_df.groupby(['loading_condition', 'state']):
+        marker = CONDITION_MARKERS.get(condition.strip().lower(), 'o')
+        filled = STATE_FILLED.get(state, True)
+        xs = [x_pos[p] for p in grp['participant']]
+        if filled:
+            ax2.scatter(xs, grp['pct_above'], color=color, marker=marker, s=60, zorder=3)
+        else:
+            ax2.scatter(xs, grp['pct_above'], facecolors='none', edgecolors=color, marker=marker,
+                        s=60, linewidths=1.4, zorder=3)
+    for fusion_p in FUSION_PARTICIPANTS:
+        if fusion_p in x_pos:
+            xp = x_pos[fusion_p]
+            ax2.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
+    ax2.set_ylim(bottom=0)
+
+    # Right axis: each patient's own threshold value, flat per column, NaN
+    # gaps so adjacent (unrelated) patients aren't connected. Pinned to 0 too
+    # - both axes share the same plot box, so bottom=0 on both is what
+    # actually aligns the two zero points.
+    threshold_color = '#c00000'
+    step_xs, step_ys = [], []
+    for participant in participants:
+        xp = x_pos[participant]
+        val = PATIENT_THRESHOLDS[participant][name]
+        step_xs.extend([xp - 0.5, xp + 0.5, float('nan')])
+        step_ys.extend([val, val, float('nan')])
+    ax2b = ax2.twinx()
+    # Background element - behind the data markers (zorder 2-3), not competing with them.
+    ax2b.plot(step_xs, step_ys, color=threshold_color, linewidth=1.2, alpha=0.4, zorder=1, solid_capstyle='butt')
+    ax2b.set_ylim(bottom=0)
+    ax2b.set_ylabel('Patient-specific {} threshold (MPS)'.format(name.upper()), color=threshold_color)
+    ax2b.tick_params(axis='y', labelcolor=threshold_color)
+    # re-show right spine for twin axis - thin/neutral, not a bold red bar;
+    # the colored tick labels/ylabel do the association work.
+    ax2b.spines['right'].set_visible(True)
+    ax2b.spines['right'].set_linewidth(0.8)
+
+    ax2.set_xticks(range(len(participants)))
+    ax2.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in participants])
+    ax2.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                 xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    ax2.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+    ax2.set_ylabel('% IVD volume above threshold')
+    ax2.set_title('IVD strain ({}, patient-specific threshold): PreOp (no preload) vs PostOp, '
+                   'by fusion status'.format(name.upper()))
+
+    threshold_line_handle = [Line2D([0], [0], color=threshold_color, linewidth=1.0,
+                                     label='{} threshold value'.format(name.upper()))]
+    ax2.legend(handles=all_handles + [blank] + threshold_line_handle,
+               loc='center left', bbox_to_anchor=(1.12, 0.5), frameon=False)
+
+    fig2.tight_layout()
+
+    pw_thresh_plot_path = os.path.join(
+        OUT_DIR,
+        'multipatient_ivd_plot_{}_prepost_sortedbymjoachange_patientwise_w_thresholds.pdf'.format(name))
+    fig2.savefig(pw_thresh_plot_path, bbox_inches='tight')
+    plt.close(fig2)
+    pw_plot_paths.append(pw_thresh_plot_path)
+
 print()
 print("Summary saved: {}".format(pw_summary_path))
 for p in pw_plot_paths:
     print("Plot saved: {}".format(p))
 
 # ============================================================
-# Fusion-patient PreOp vs PostOp diff, T95 ONLY, BOTH threshold versions
-# (cohort-pooled and patient-wise) side by side in one Obsidian-ready
-# markdown table. Flexion and Extension kept FULLY SEPARATE (never averaged
-# together - they are distinct loading modes; averaging them hides cases
-# where one condition increases PostOp while the other decreases, as
-# happened for P5 Flexion at patient-wise T90). T95 is the one combination
-# (of cohort-pooled/patient-wise x T90/T95/T97/T99) where all of P5/P7/P8
-# increase PostOp in BOTH conditions individually under the patient-wise
-# version, with P1 the clear exception - if that changes (e.g. after further
-# data fixes), update PRINT_PERCENTILE below rather than printing every
-# combination again. Reuses pw_summary, summary, FUSION_PARTICIPANTS, pd
-# already loaded/defined above - does not modify anything above this point.
+# Fusion-patient PreOp vs PostOp diff, both threshold versions, as one
+# Obsidian-ready markdown table. Flexion/Extension kept separate - never average them.
 # ============================================================
 PRINT_PERCENTILE = 't95'
 
@@ -455,15 +441,33 @@ pw_piv = _fusion_pivot(pw_summary, PRINT_PERCENTILE)
 glob_piv = _fusion_pivot(summary, PRINT_PERCENTILE)
 combined = pw_piv.join(glob_piv, lsuffix='_pw', rsuffix='_global').reset_index()
 combined = combined.sort_values(['participant', 'loading_condition'])
+combined['threshold_pw'] = combined['participant'].map(
+    lambda p: PATIENT_THRESHOLDS[p][PRINT_PERCENTILE])
+combined['threshold_global'] = COHORT_THRESHOLDS[PRINT_PERCENTILE]
 
 print()
 print("Fusion-patient PreOp vs PostOp diff - {} (Obsidian-ready markdown):".format(PRINT_PERCENTILE.upper()))
 print()
-print("| Participant | Condition | PreOp PW (%) | PostOp PW (%) | Delta PW (pp) "
-      "| PreOp Global (%) | PostOp Global (%) | Delta Global (pp) |")
-print("|---|---|---|---|---|---|---|---|")
+print("| Participant | Condition | Threshold PW | PreOp PW (%) | PostOp PW (%) | Delta PW (pp) "
+      "| Threshold Global | PreOp Global (%) | PostOp Global (%) | Delta Global (pp) |")
+print("|---|---|---|---|---|---|---|---|---|---|")
 for _, r in combined.iterrows():
-    print("| {} | {} | {:.2f} | {:.2f} | {:+.2f} | {:.2f} | {:.2f} | {:+.2f} |".format(
-        r['participant'], r['loading_condition'],
+    print("| {} | {} | {:.4f} | {:.2f} | {:.2f} | {:+.2f} | {:.4f} | {:.2f} | {:.2f} | {:+.2f} |".format(
+        r['participant'], r['loading_condition'], r['threshold_pw'],
         r[STATE_PREOP + '_pw'], r[STATE_POSTOP + '_pw'], r['delta_pw'],
+        r['threshold_global'],
         r[STATE_PREOP + '_global'], r[STATE_POSTOP + '_global'], r['delta_global']))
+
+# ============================================================
+# Standalone table: just the threshold VALUES (patient-wise per fusion
+# patient, plus the single global value for reference) - separate from the
+# PreOp/PostOp %-above table above.
+# ============================================================
+print()
+print("Threshold values - {} (Obsidian-ready markdown):".format(PRINT_PERCENTILE.upper()))
+print()
+print("| Participant | Threshold PW (MPS) | Threshold Global (MPS) |")
+print("|---|---|---|")
+for fusion_p in sorted(FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+    print("| {} | {:.4f} | {:.4f} |".format(
+        fusion_p, PATIENT_THRESHOLDS[fusion_p][PRINT_PERCENTILE], COHORT_THRESHOLDS[PRINT_PERCENTILE]))
