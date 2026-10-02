@@ -339,6 +339,18 @@ preop_nopreload_elements, preop_nopreload_summary = run_dataset(
     id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
                         'loading_condition': str(row['loading_condition']).strip()})
 
+print("")
+print("=== PostOp ===")
+postop_rows = id_map[
+    (id_map['State'].astype(str).str.strip().str.lower() == 'postop') &
+    (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+]
+postop_elements, postop_summary = run_dataset(
+    postop_rows, PREOP_THRESHOLDS, 'postop', 'PostOp',
+    has_condition=True,
+    id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
+                        'loading_condition': str(row['loading_condition']).strip()})
+
 # print("")
 # print("=== Oscillation ===")
 # osc_rows = id_map[id_map['loading_condition'].astype(str).str.strip().str.lower() == 'oscillation']
@@ -364,6 +376,12 @@ NOPRELOAD_THRESHOLD = 0.02
 os.environ.setdefault('R_HOME', r'C:\Program Files\R\R-4.6.1')
 os.environ.setdefault('R_LIBS_USER', os.path.join(os.path.expanduser('~'), 'Documents', 'R', 'win-library', '4.6'))
 os.environ['PATH'] = os.path.join(os.environ['R_HOME'], 'bin', 'x64') + os.pathsep + os.environ['PATH']
+# If Git's own sh.exe is on PATH (e.g. running under Git Bash), R's "CMD
+# config" routes through its Unix-style config.sh, which shells out to
+# 'make' - not installed here, which crashes rpy2's import. Strip Git's
+# bin dirs so R falls back to its native Windows config path instead.
+os.environ['PATH'] = os.pathsep.join(
+    p for p in os.environ['PATH'].split(os.pathsep) if 'Git' not in p)
 
 import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
@@ -700,12 +718,27 @@ with open(summary_md_nopreload_path, 'w', encoding='utf-8') as f:
 print("")
 print("Summary saved: {}".format(summary_md_nopreload_path))
 
-# TODO: PostOp GM/WM tissue-distinct model goes here, once PostOp's
-# '_mps_GM_WM.csv' extraction has run - a pooled
-# pct_above ~ tissue * state + (1 | patient) over PreOp-NoPreload + PostOp,
-# both at threshold=0.02 (valid now since both states share one threshold,
-# unlike the 3-state PreOp-with-preload comparison). Goes above the
-# whole-cord analysis below once built.
+# --- PostOp: Model 1 only, same threshold as PreOp-NoPreload so the two
+# states are directly comparable (Part 2 below) ---
+print("")
+print("=== Linear mixed-effects models: PostOp, threshold={:.2f} ===".format(NOPRELOAD_THRESHOLD))
+model1_section_postop = run_model1_lmm(postop_elements, 'postop', 'PostOp',
+                                        threshold=NOPRELOAD_THRESHOLD, ymax=70)
+
+summary_md_postop = (
+    "# GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_postop
+)
+summary_md_postop_path = os.path.join(OUT_DIR, 'lmm_summary_postop.md')
+with open(summary_md_postop_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_postop)
+print("")
+print("Summary saved: {}".format(summary_md_postop_path))
+
+# TODO (Part 2, discussed not yet built): PreOp-NoPreload vs PostOp,
+# GM/WM differentiated - diff each patient's pct_above (PostOp - PreOp) per
+# tissue, then test diff ~ tissue + (1 | patient), falling back to a paired
+# t-test per tissue if singular (same pattern as the whole-cord model below).
 
 # ============================================================
 # Whole cord (not tissue-split): PreOp (no preload) vs PostOp, threshold=0.02.
