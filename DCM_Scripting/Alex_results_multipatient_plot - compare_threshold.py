@@ -152,8 +152,10 @@ for _, row in id_map.iterrows():
     state = str(row.get('State', '')).strip().lower()
     if state and state != 'preop':
         continue
-    csv_path = str(row.get('csv_path', '')).strip()
     condition = str(row.get('loading_condition', '')).strip()
+    if condition.strip().lower() not in ('flexion', 'extension'):
+        continue
+    csv_path = str(row.get('csv_path', '')).strip()
     if not csv_path or csv_path.lower() == 'nan' or not os.path.isfile(csv_path):
         missing.append(row)
         continue
@@ -399,75 +401,6 @@ blob_df = pd.DataFrame(blob_records)
 blob_summary_path = os.path.join(OUT_DIR, 'multipatient_blob_distribution_summary.csv')
 blob_df.to_csv(blob_summary_path, index=False)
 print("Blob summary saved: {}".format(blob_summary_path))
-
-blob_fig, blob_ax = plt.subplots(figsize=(7.5, 5.5))
-
-# Common left/right edge across ALL curves in this plot, so every curve is
-# explicitly extended to it (0% at the left edge, held flat at its own final
-# value out to the right edge) - otherwise a curve whose own r-range is
-# narrower than another curve's just stops short, appearing to "float" in
-# the middle of the axes instead of spanning it.
-blob_all_r = [r for blobs in blob_pooled.values() for r, _ in blobs]
-blob_r_min = min(blob_all_r) * 0.9
-blob_r_max = max(blob_all_r) * 1.1
-
-# Normalize each curve by TOTAL CORD VOLUME (pooled across the same patients
-# that contributed blobs for that condition), not by the curve's own
-# exceeding-volume subset. This is a fixed, threshold-independent
-# denominator, so a curve's final height shows the real % of cord volume
-# exceeding that threshold (comparable across curves/thresholds), instead
-# of every curve being forced to reach 100% regardless of magnitude.
-blob_cord_vol_by_condition = defaultdict(float)
-for (blob_p, blob_c) in blob_adjacency_cache:
-    blob_cord_vol_by_condition[blob_c] += per_patient[(blob_p, blob_c)]['volume'].sum()
-
-for (blob_threshold_name, blob_condition), blobs in sorted(blob_pooled.items()):
-    blobs_sorted = sorted(blobs, key=lambda b: b[0])
-    blob_total_vol = blob_cord_vol_by_condition[blob_condition]
-    if blob_total_vol <= 0:
-        continue
-    blob_rs = [blob_r_min] + [b[0] for b in blobs_sorted] + [blob_r_max]
-    blob_cum_vol = 0.0
-    blob_cum_pct = [0.0]
-    for _, v in blobs_sorted:
-        blob_cum_vol += v
-        blob_cum_pct.append(100.0 * blob_cum_vol / blob_total_vol)
-    blob_cum_pct.append(blob_cum_pct[-1])   # hold flat at final value out to the right edge
-
-    blob_color = MANUAL_THRESHOLD_COLORS[blob_threshold_name]
-    blob_linestyle = BLOB_CONDITION_LINESTYLES.get(blob_condition.strip().lower(), ':')
-    # steps-post: cumulative % already includes the blob at each r, so it
-    # should hold flat until the next (larger) blob's r, not interpolate
-    # diagonally as if intermediate blob sizes existed between them.
-    blob_ax.plot(blob_rs, blob_cum_pct, color=blob_color, linestyle=blob_linestyle, linewidth=1.5,
-                 drawstyle='steps-post')
-
-blob_ax.set_xscale('log')
-blob_ax.set_xlim(blob_r_min, blob_r_max)
-blob_ax.set_ylim(0, 100)
-blob_ax.set_xlabel('MPS concentration effective radius r (mm)') #equivalent sphere
-blob_ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
-
-blob_threshold_handles = [Line2D([0], [0], color=MANUAL_THRESHOLD_COLORS[name], linestyle='-',
-                                  label='{:.2f}'.format(val))
-                           for name, val in MANUAL_THRESHOLDS.items()]
-blob_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
-                           for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
-
-blob_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
-blob_all_handles = (
-    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + blob_threshold_handles +
-    [blob_blank_handle] +
-    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + blob_condition_handles
-)
-blob_fig.legend(handles=blob_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
-
-blob_fig.tight_layout()
-blob_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_blob_distribution.pdf')
-blob_fig.savefig(blob_plot_path, bbox_inches='tight')
-plt.close(blob_fig)
-
-print("Plot saved: {}".format(blob_plot_path))
 
 # ============================================================
 # Fourth plot: per-patient faceted breakdown of the same blob distribution,
