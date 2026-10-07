@@ -1974,32 +1974,38 @@ matter, within {condition} ({pct_lbl}).
 
 
 def save_gmvswm_qq_grid(entries, grid_path):
-    """entries: list of (row_label, condition, qq_tuple, sw_stat, sw_p),
+    """entries: list of (row_label, column_label, qq_tuple, sw_stat, sw_p),
     qq_tuple = (theoretical, sample, line_slope, line_intercept) from R's
     qqnorm()/qqline() (computed in _fit_one_condition_tissue_model - no
     scipy dependency in this codebase). Grid rows = distinct row_label (in
-    order of first appearance), columns = Flexion/Extension - combines what
-    would otherwise be one QQ PDF per (state, condition) into one figure."""
+    order of first appearance); each row's own entries are laid out into
+    columns POSITIONALLY, in the order they appear for that row -
+    column_label is just that panel's own title text, not matched across
+    rows, so different rows may show different column labels/counts (e.g.
+    different threshold sets per state). Combines what would otherwise be
+    one QQ PDF per (row, column) into one figure. Name kept 'gmvswm' for
+    history - also reused by Part K's oscillation LMM grid."""
     row_labels = list(dict.fromkeys(e[0] for e in entries))
-    conditions = ('Flexion', 'Extension')
-    by_key = {(e[0], e[1]): e for e in entries}
+    entries_by_row = {row_label: [e for e in entries if e[0] == row_label] for row_label in row_labels}
+    n_cols = max(len(v) for v in entries_by_row.values())
 
-    fig, axes = plt.subplots(len(row_labels), 2, figsize=(9, 4.5 * len(row_labels)), squeeze=False)
+    fig, axes = plt.subplots(len(row_labels), n_cols, figsize=(4.5 * n_cols, 4.5 * len(row_labels)), squeeze=False)
     for row_idx, row_label in enumerate(row_labels):
-        for col_idx, condition in enumerate(conditions):
+        row_entries = entries_by_row[row_label]
+        for col_idx in range(n_cols):
             ax = axes[row_idx][col_idx]
-            entry = by_key.get((row_label, condition))
-            if entry is None:
+            if col_idx >= len(row_entries):
                 ax.axis('off')
                 continue
-            _, _, (qq_theoretical, qq_sample, qq_slope, qq_intercept), sw_stat, sw_p = entry
+            _, column_label, (qq_theoretical, qq_sample, qq_slope, qq_intercept), sw_stat, sw_p = \
+                row_entries[col_idx]
             ax.scatter(qq_theoretical, qq_sample, color=NAVY, s=20, alpha=0.8)
             line_x = [min(qq_theoretical), max(qq_theoretical)]
             line_y = [qq_slope * x + qq_intercept for x in line_x]
             ax.plot(line_x, line_y, color='red')
             ax.set_xlabel('Theoretical Quantiles')
             ax.set_ylabel('Sample Quantiles')
-            ax.set_title('{} ({})\nShapiro-Wilk: W={:.3g}, p={:.3g}'.format(row_label, condition, sw_stat, sw_p))
+            ax.set_title('{} ({})\nShapiro-Wilk: W={:.3g}, p={:.3g}'.format(row_label, column_label, sw_stat, sw_p))
 
     fig.tight_layout()
     fig.savefig(grid_path, bbox_inches='tight')
@@ -2420,66 +2426,99 @@ print("=" * 70)
 # reduce_to_frame_mode defined above.
 # ============================================================
 OSC_STATE_OSCILLATION = 'Oscillation'
+OSC_STATES = ('PreOp',)   # PostOp dropped entirely (zero-inflated, Shapiro-Wilk fails badly at
+# every threshold tried, 0.005/0.01/0.015 - see Part K for detail); PreOp-NoPreload has no
+# Oscillation rows at all in id_map either way.
 
 OSC_METRIC_CUMULATIVE = 'cumulative'
 OSC_METRIC_AT_PEAK = 'at_peak'
 OSC_METRIC_FILLED = {OSC_METRIC_CUMULATIVE: True, OSC_METRIC_AT_PEAK: False}   # solid vs hollow marker
 
-OSC_CACHE_THRESHOLDS = {'t0p10': 0.10, 't0p15': 0.15}
-OSC_CACHE_THRESHOLD_COLORS = {'t0p10': '#2e75b6', 't0p15': '#c00000'}
-OSC_CUM_PEAK_DISPLAY_THRESHOLDS = OSC_CACHE_THRESHOLDS
-OSC_DELTA_DISPLAY_THRESHOLDS = OSC_CACHE_THRESHOLDS
+# PostOp strain magnitude is much lower than PreOp-with-preload (same
+# reason Stage 1 needed 0.015 instead of 0.15 for PostOp's GM-vs-WM LMM) -
+# 0.10/0.15 read as all-zero for PostOp oscillation. Thresholds are
+# therefore per-state, not shared. t0p005 is cached pre-emptively (cheap -
+# same raw data, one more threshold) as a ready fallback if 0.01/0.015 also
+# turn out degenerate for PostOp; swap it into OSC_THRESHOLDS_BY_STATE if so.
+OSC_ALL_THRESHOLDS = {'t0p005': 0.005, 't0p01': 0.01, 't0p015': 0.015, 't0p10': 0.10, 't0p15': 0.15}
+OSC_THRESHOLDS_BY_STATE = {
+    'PreOp': {'t0p10': 0.10, 't0p15': 0.15},
+    'PostOp': {'t0p005': 0.005, 't0p01': 0.01, 't0p015': 0.015},
+}
+OSC_CACHE_THRESHOLD_COLORS = {
+    't0p005': '#548235',  # green (fallback threshold, distinct from the others)
+    't0p01': '#2a78d6',   # blue (matches Stage 1 convention)
+    't0p015': '#1baf7a',  # aqua
+    't0p10': '#2e75b6',   # blue (existing oscillation convention)
+    't0p15': '#c00000',   # red (existing oscillation convention)
+}
 
 # --- Cache: small derived summary (per-frame + cumulative pct_above per
-# participant per threshold) - not the full raw per-element-per-frame data. ---
-osc_own_cache_path = os.path.join(STAGE3_CACHE_DIR, 'cache_oscillation_cumulative_vs_peak_preop.csv')
+# participant per threshold) - not the full raw per-element-per-frame data.
+# Covers BOTH PreOp and PostOp oscillation rows (id_map has both; PreOp-
+# NoPreload has none - oscillation is built on top of the preload-bearing
+# Step-1, so a no-preload variant doesn't exist in this dataset). ---
+osc_own_cache_path = os.path.join(STAGE3_CACHE_DIR, 'cache_oscillation_cumulative_vs_peak.csv')
 
+# Validated, not just trusted - a cache built before a threshold/state set
+# changed in code would otherwise be loaded silently and produce empty
+# results for whatever it's missing (exactly what happened when PostOp's
+# thresholds were added after PreOp's cache already existed).
+osc_required_thresholds = set().union(*(set(d.keys()) for d in OSC_THRESHOLDS_BY_STATE.values()))
+osc_cache_valid = False
 if os.path.isfile(osc_own_cache_path):
     print("Loading cached summary: {}".format(osc_own_cache_path))
     osc_cache_df = pd.read_csv(osc_own_cache_path)
-else:
-    print("No cache at {} yet - building it.".format(osc_own_cache_path))
+    osc_cache_valid = (osc_required_thresholds <= set(osc_cache_df['threshold'].unique()) and
+                       set(OSC_STATES) <= set(osc_cache_df['state'].unique()))
+    if not osc_cache_valid:
+        print("  Cache is missing required state(s)/threshold(s) (need thresholds {}, states {}) - "
+              "rebuilding.".format(sorted(osc_required_thresholds), OSC_STATES))
+
+if not osc_cache_valid:
+    print("No (valid) cache at {} yet - building it.".format(osc_own_cache_path))
     osc_rows = id_map[
         (id_map['loading_condition'].astype(str).str.strip().str.lower() == OSC_STATE_OSCILLATION.lower()) &
-        (id_map['State'].astype(str).str.strip().str.lower() == 'preop')
+        (id_map['State'].astype(str).str.strip().isin(OSC_STATES))
     ]
     if osc_rows.empty:
-        raise SystemExit("No rows with loading_condition == '{}' and State == 'PreOp' found in "
-                          "id_map.csv.".format(OSC_STATE_OSCILLATION))
+        raise SystemExit("No rows with loading_condition == '{}' and State in {} found in "
+                          "id_map.csv.".format(OSC_STATE_OSCILLATION, OSC_STATES))
 
     osc_cache_rows = []
     osc_missing = []
     for _, osc_row in osc_rows.iterrows():
         osc_participant = int(osc_row['participant'])
+        osc_state = str(osc_row['State']).strip()
         osc_csv_path = str(osc_row.get('csv_path', '')).strip()
         if not osc_csv_path or osc_csv_path.lower() == 'nan' or not os.path.isfile(osc_csv_path):
-            osc_missing.append(osc_participant)
+            osc_missing.append((osc_participant, osc_state))
             continue
         osc_raw = pd.read_csv(osc_csv_path)
 
         # At-peak: per-frame pct_above, for every frame of the oscillation history.
         for osc_frame_idx, osc_frame_df in osc_raw.groupby('frame_index'):
             osc_frame_value = osc_frame_df['frame_value'].iloc[0]
-            for osc_name, osc_val in OSC_CACHE_THRESHOLDS.items():
+            for osc_name, osc_val in OSC_ALL_THRESHOLDS.items():
                 osc_cache_rows.append({
-                    'participant': osc_participant, 'metric': OSC_METRIC_AT_PEAK,
+                    'participant': osc_participant, 'state': osc_state, 'metric': OSC_METRIC_AT_PEAK,
                     'frame_index': osc_frame_idx, 'frame_value': osc_frame_value,
                     'threshold': osc_name, 'pct_above': pct_volume_above(osc_frame_df, osc_val),
                 })
 
         # Cumulative: element-wise peak over the whole history, then one pct_above per threshold.
         osc_peak_reduced = reduce_to_frame_mode(osc_raw, 'peak')
-        for osc_name, osc_val in OSC_CACHE_THRESHOLDS.items():
+        for osc_name, osc_val in OSC_ALL_THRESHOLDS.items():
             osc_cache_rows.append({
-                'participant': osc_participant, 'metric': OSC_METRIC_CUMULATIVE,
+                'participant': osc_participant, 'state': osc_state, 'metric': OSC_METRIC_CUMULATIVE,
                 'frame_index': None, 'frame_value': None,
                 'threshold': osc_name, 'pct_above': pct_volume_above(osc_peak_reduced, osc_val),
             })
 
     if osc_missing:
-        print("Skipping {} patient(s) with no csv_path set (or file not found):".format(len(osc_missing)))
-        for osc_p in osc_missing:
-            print("  P{}".format(osc_p))
+        print("Skipping {} patient/state row(s) with no csv_path set (or file not found):".format(len(osc_missing)))
+        for osc_p, osc_s in osc_missing:
+            print("  P{} ({})".format(osc_p, osc_s))
 
     if not osc_cache_rows:
         raise SystemExit("No data loaded - check id_map.csv.")
@@ -2488,185 +2527,552 @@ else:
     osc_cache_df.to_csv(osc_own_cache_path, index=False)
     print("Cached summary: {}".format(osc_own_cache_path))
 
-osc_target_participants = sorted(osc_cache_df['participant'].unique())
-
-osc_participants = sorted(('P{}'.format(p) for p in osc_target_participants),
+osc_participants = sorted(('P{}'.format(p) for p in osc_cache_df['participant'].unique()),
                           key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
 osc_x_pos = {p: i for i, p in enumerate(osc_participants)}
 
+# Alternative ordering (change in mJOA, postop - preop) for the cumulative-
+# vs-at-peak plot only - same precedent as Stage 1's "sortedbymjoachange"
+# plots. Restricted to participants with both pre- and post-op mJOA, same
+# as that precedent.
+osc_mjoa_change_participants = sorted(
+    (p for p in osc_participants if p in mjoa_delta_by_participant),
+    key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+osc_mjoa_change_x_pos = {p: i for i, p in enumerate(osc_mjoa_change_participants)}
+
 # ============================================================
-# Summary + Plot 1: cumulative vs at-peak (worst frame) % cord volume above threshold
+# Summary + Plot 1: cumulative vs at-peak (worst frame) % cord volume above
+# threshold. Plot 2: Delta (at-peak - baseline). Both run once per state
+# (PreOp, PostOp), separate output files - same convention as the GMvsWM
+# boxplots (combine diagnostics, keep the headline plots per-cohort).
 # ============================================================
-osc_records = []
-for osc_p in osc_target_participants:
-    osc_p_label = 'P{}'.format(osc_p)
-    for osc_name in OSC_CUM_PEAK_DISPLAY_THRESHOLDS:
-        osc_cum_row = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
-                                    (osc_cache_df['metric'] == OSC_METRIC_CUMULATIVE) &
-                                    (osc_cache_df['threshold'] == osc_name)]
-        osc_peak_rows = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
-                                      (osc_cache_df['metric'] == OSC_METRIC_AT_PEAK) &
-                                      (osc_cache_df['threshold'] == osc_name)]
-        if osc_cum_row.empty or osc_peak_rows.empty:
-            continue
-        osc_cumulative_pct = osc_cum_row['pct_above'].iloc[0]
-        osc_at_peak_row = osc_peak_rows.loc[osc_peak_rows['pct_above'].idxmax()]
-        osc_records.append({
-            'participant': osc_p_label,
-            'threshold': osc_name,
-            'pct_above_cumulative': osc_cumulative_pct,
-            'pct_above_at_peak': osc_at_peak_row['pct_above'],
-            'at_peak_frame_index': osc_at_peak_row['frame_index'],
-            'at_peak_frame_value': osc_at_peak_row['frame_value'],
-            'gap_cumulative_minus_at_peak': osc_cumulative_pct - osc_at_peak_row['pct_above'],
-        })
-osc_summary = pd.DataFrame(osc_records)
+for osc_state in OSC_STATES:
+    osc_state_df = osc_cache_df[osc_cache_df['state'] == osc_state]
+    osc_state_tag = osc_state.lower()
+    osc_display_thresholds = OSC_THRESHOLDS_BY_STATE[osc_state]
+    osc_target_participants = sorted(osc_state_df['participant'].unique())
+    if not osc_target_participants:
+        print("No oscillation data for state '{}' - skipping.".format(osc_state))
+        continue
 
-osc_summary_path = os.path.join(STAGE3_RESULTS_DIR, 'multipatient_mps_summary_oscillation_cumulative_vs_peak.csv')
-osc_summary.to_csv(osc_summary_path, index=False)
-print(osc_summary.to_string(index=False))
+    osc_records = []
+    for osc_p in osc_target_participants:
+        osc_p_label = 'P{}'.format(osc_p)
+        for osc_name in osc_display_thresholds:
+            osc_cum_row = osc_state_df[(osc_state_df['participant'] == osc_p) &
+                                        (osc_state_df['metric'] == OSC_METRIC_CUMULATIVE) &
+                                        (osc_state_df['threshold'] == osc_name)]
+            osc_peak_rows = osc_state_df[(osc_state_df['participant'] == osc_p) &
+                                          (osc_state_df['metric'] == OSC_METRIC_AT_PEAK) &
+                                          (osc_state_df['threshold'] == osc_name)]
+            if osc_cum_row.empty or osc_peak_rows.empty:
+                continue
+            osc_cumulative_pct = osc_cum_row['pct_above'].iloc[0]
+            osc_at_peak_row = osc_peak_rows.loc[osc_peak_rows['pct_above'].idxmax()]
+            osc_records.append({
+                'participant': osc_p_label,
+                'threshold': osc_name,
+                'pct_above_cumulative': osc_cumulative_pct,
+                'pct_above_at_peak': osc_at_peak_row['pct_above'],
+                'at_peak_frame_index': osc_at_peak_row['frame_index'],
+                'at_peak_frame_value': osc_at_peak_row['frame_value'],
+                'gap_cumulative_minus_at_peak': osc_cumulative_pct - osc_at_peak_row['pct_above'],
+            })
+    osc_summary = pd.DataFrame(osc_records)
 
-print()
-print("Mean/median gap (cumulative - at-peak) by threshold:")
-print(osc_summary.groupby('threshold')['gap_cumulative_minus_at_peak'].agg(['mean', 'median']).to_string())
+    osc_summary_path = os.path.join(
+        STAGE3_RESULTS_DIR, 'multipatient_mps_summary_oscillation_cumulative_vs_peak_{}.csv'.format(osc_state_tag))
+    osc_summary.to_csv(osc_summary_path, index=False)
+    print("")
+    print("=== Oscillation cumulative vs at-peak: {} ===".format(osc_state))
+    print(osc_summary.to_string(index=False))
 
-osc_long_df = pd.concat([
-    osc_summary[['participant', 'threshold', 'pct_above_cumulative']].rename(
-        columns={'pct_above_cumulative': 'pct_above'}).assign(metric=OSC_METRIC_CUMULATIVE),
-    osc_summary[['participant', 'threshold', 'pct_above_at_peak']].rename(
-        columns={'pct_above_at_peak': 'pct_above'}).assign(metric=OSC_METRIC_AT_PEAK),
-], ignore_index=True)
+    print()
+    print("Mean/median gap (cumulative - at-peak) by threshold:")
+    print(osc_summary.groupby('threshold')['gap_cumulative_minus_at_peak'].agg(['mean', 'median']).to_string())
 
-osc_fig, osc_ax = plt.subplots(figsize=(8, 5.5))
+    osc_long_df = pd.concat([
+        osc_summary[['participant', 'threshold', 'pct_above_cumulative']].rename(
+            columns={'pct_above_cumulative': 'pct_above'}).assign(metric=OSC_METRIC_CUMULATIVE),
+        osc_summary[['participant', 'threshold', 'pct_above_at_peak']].rename(
+            columns={'pct_above_at_peak': 'pct_above'}).assign(metric=OSC_METRIC_AT_PEAK),
+    ], ignore_index=True)
 
-for osc_name in OSC_CUM_PEAK_DISPLAY_THRESHOLDS:
-    osc_col_df = osc_long_df[osc_long_df['threshold'] == osc_name]
-    osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
-    for osc_participant, osc_grp in osc_col_df.groupby('participant'):
-        if len(osc_grp) == 2:
-            osc_xp = osc_x_pos[osc_participant]
-            osc_ax.vlines(osc_xp, osc_grp['pct_above'].min(), osc_grp['pct_above'].max(),
-                           color=osc_color, linewidth=1.0, alpha=0.5, zorder=2)
-    for osc_metric, osc_grp in osc_col_df.groupby('metric'):
-        osc_filled = OSC_METRIC_FILLED.get(osc_metric, True)
-        osc_xs = [osc_x_pos[p] for p in osc_grp['participant']]
-        if osc_filled:
-            osc_ax.scatter(osc_xs, osc_grp['pct_above'], color=osc_color, marker='o', s=55, zorder=3)
+    osc_fig, osc_ax = plt.subplots(figsize=(8, 5.5))
+
+    # Sorted by change in mJOA (not pre-op mJOA) - same precedent as Stage
+    # 1's "sortedbymjoachange" plots. Restricted to participants with both
+    # pre- and post-op mJOA.
+    osc_cvp_long_df = osc_long_df[osc_long_df['participant'].isin(osc_mjoa_change_participants)]
+
+    for osc_name in osc_display_thresholds:
+        osc_col_df = osc_cvp_long_df[osc_cvp_long_df['threshold'] == osc_name]
+        osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
+        for osc_participant, osc_grp in osc_col_df.groupby('participant'):
+            if len(osc_grp) == 2:
+                osc_xp = osc_mjoa_change_x_pos[osc_participant]
+                osc_ax.vlines(osc_xp, osc_grp['pct_above'].min(), osc_grp['pct_above'].max(),
+                               color=osc_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for osc_metric, osc_grp in osc_col_df.groupby('metric'):
+            osc_filled = OSC_METRIC_FILLED.get(osc_metric, True)
+            osc_xs = [osc_mjoa_change_x_pos[p] for p in osc_grp['participant']]
+            if osc_filled:
+                osc_ax.scatter(osc_xs, osc_grp['pct_above'], color=osc_color, marker='o', s=55, zorder=3)
+            else:
+                osc_ax.scatter(osc_xs, osc_grp['pct_above'], facecolors='none', edgecolors=osc_color, marker='o',
+                                s=55, linewidths=1.3, zorder=3)
+
+    osc_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
+                                     label='{:g}'.format(val))
+                              for name, val in osc_display_thresholds.items()]
+    osc_metric_handles = [
+        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black',
+               label='Cumulative (ever exceeds)'),
+        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none',
+               label='At-peak (worst single frame)'),
+    ]
+    osc_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+    osc_all_handles = (
+        [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_threshold_handles +
+        [osc_blank] +
+        [Line2D([0], [0], linestyle='none', marker='None', label='Metric')] + osc_metric_handles
+    )
+    osc_ax.legend(handles=osc_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    osc_ax.set_xticks(range(len(osc_mjoa_change_participants)))
+    osc_ax.set_xticklabels(
+        ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in osc_mjoa_change_participants])
+    osc_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    osc_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+    osc_ax.set_ylabel('% cord volume above threshold')
+    osc_ax.set_title('Oscillation ({}): cumulative (ever-exceeds) vs. at-peak (simultaneous) % cord volume'.format(
+        osc_state))
+    osc_fig.tight_layout()
+
+    osc_plot_path = os.path.join(
+        STAGE3_RESULTS_DIR,
+        'multipatient_mps_plot_oscillation_cumulative_vs_peak_sortedbymjoachange_{}.pdf'.format(osc_state_tag))
+    osc_fig.savefig(osc_plot_path, bbox_inches='tight')
+    plt.close(osc_fig)
+
+    print()
+    print("Summary saved: {}".format(osc_summary_path))
+    print("Plot saved: {}".format(osc_plot_path))
+
+    # --- Plot 2: Delta (At-peak worst single frame MINUS Baseline). Baseline
+    # is the pre-oscillation starting state (frame_index==0 of the same
+    # Step-3, i.e. preload only, before any oscillation displacement). ---
+    osc_delta_records = []
+    for osc_p in osc_target_participants:
+        osc_p_label = 'P{}'.format(osc_p)
+        for osc_name in osc_display_thresholds:
+            osc_peak_rows = osc_state_df[(osc_state_df['participant'] == osc_p) &
+                                          (osc_state_df['metric'] == OSC_METRIC_AT_PEAK) &
+                                          (osc_state_df['threshold'] == osc_name)]
+            osc_base_row = osc_peak_rows[osc_peak_rows['frame_index'] == 0]
+            if osc_peak_rows.empty or osc_base_row.empty:
+                continue
+            osc_at_peak_pct = osc_peak_rows['pct_above'].max()
+            osc_baseline_pct = osc_base_row['pct_above'].iloc[0]
+            osc_delta_records.append({
+                'participant': osc_p_label,
+                'threshold': osc_name,
+                'pct_above_baseline': osc_baseline_pct,
+                'pct_above_at_peak': osc_at_peak_pct,
+                'delta_at_peak_minus_baseline': osc_at_peak_pct - osc_baseline_pct,
+            })
+    osc_delta_summary = pd.DataFrame(osc_delta_records)
+
+    osc_delta_summary_path = os.path.join(
+        STAGE3_RESULTS_DIR,
+        'multipatient_mps_summary_oscillation_delta_at_peak_vs_baseline_{}.csv'.format(osc_state_tag))
+    osc_delta_summary.to_csv(osc_delta_summary_path, index=False)
+    print(osc_delta_summary.to_string(index=False))
+
+    print()
+    print("Mean/median delta (at-peak - baseline) by threshold:")
+    print(osc_delta_summary.groupby('threshold')['delta_at_peak_minus_baseline'].agg(['mean', 'median']).to_string())
+
+    osc_delta_min = osc_delta_summary['delta_at_peak_minus_baseline'].min()
+    osc_delta_max = osc_delta_summary['delta_at_peak_minus_baseline'].max()
+    osc_delta_pad = 0.1 * max(abs(osc_delta_min), abs(osc_delta_max), 1e-9)
+    osc_delta_ylim = (osc_delta_min - osc_delta_pad, osc_delta_max + osc_delta_pad)
+
+    osc_delta_fig, osc_delta_ax = plt.subplots(figsize=(8, 5.5))
+
+    for osc_name in osc_display_thresholds:
+        osc_col_df = osc_delta_summary[osc_delta_summary['threshold'] == osc_name]
+        osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
+        osc_xs = [osc_x_pos[p] for p in osc_col_df['participant']]
+        # alpha<1 so overlapping points (common here - many patients cluster near
+        # delta=0) show as visibly darker/stacked instead of hiding each other.
+        osc_delta_ax.scatter(osc_xs, osc_col_df['delta_at_peak_minus_baseline'], color=osc_color, marker='o', s=55,
+                              alpha=1, edgecolors='none', zorder=3)
+
+    osc_delta_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
+    osc_delta_ax.set_ylim(osc_delta_ylim)
+    osc_delta_ax.set_xticks(range(len(osc_participants)))
+    osc_delta_ax.set_xticklabels(
+        ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in osc_participants])
+    osc_delta_ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                           xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    osc_delta_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+    osc_delta_ax.set_ylabel('Δ % cord volume above threshold\n(At-peak - Baseline)')
+    osc_delta_ax.set_title(
+        'Oscillation ({}): Δ % cord volume above threshold, worst single frame vs. pre-oscillation baseline'.format(
+            osc_state))
+
+    osc_delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
+                                           label='{:g}'.format(val))
+                                    for name, val in osc_display_thresholds.items()]
+    osc_delta_ax.legend(
+        handles=[Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_delta_threshold_handles,
+        loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    osc_delta_fig.tight_layout()
+
+    osc_delta_plot_path = os.path.join(
+        STAGE3_RESULTS_DIR,
+        'multipatient_mps_plot_oscillation_delta_at_peak_vs_baseline_sortedbypreopmJOA_{}.pdf'.format(osc_state_tag))
+    osc_delta_fig.savefig(osc_delta_plot_path, bbox_inches='tight')
+    plt.close(osc_delta_fig)
+
+    print()
+    print("Summary saved: {}".format(osc_delta_summary_path))
+    print("Plot saved: {}".format(osc_delta_plot_path))
+
+print("")
+print("=" * 70)
+print("PART K: Oscillation vs no-oscillation LMM (PreOp only)")
+print("=" * 70)
+
+# ============================================================
+# Tests the effect of oscillation on MPS directly: pct_above ~ oscillation +
+# (1 | patient), where "oscillation" compares the pre-oscillation baseline
+# (frame 0 of Step-3, i.e. preload only, before any cyclic displacement)
+# against the CUMULATIVE metric (% of cord that exceeds the threshold at
+# ANY point during the step - not at-peak/worst-frame, which the plots
+# above use instead). Fit per threshold (0.10, 0.15), same LMM-first/
+# paired-t-test-fallback convention as Part C. Reuses get_coef_df/
+# get_varcorr_df/r_table_to_markdown_from_df/format_random_effects_md/NAVY/
+# TEAL/PREAMBLE/save_gmvswm_qq_grid already set up above.
+#
+# PostOp dropped entirely (OSC_STATES is PreOp-only above) - at 0.01/0.015
+# (and 0.005), the paired differences are heavily zero-inflated (most
+# patients exactly 0.0, a few nonzero) - Shapiro-Wilk fails badly (W around
+# 0.55, p<0.0001) and the paired t-test result isn't trustworthy.
+# ============================================================
+
+
+def _fit_osc_exposure_model(osc_state_df, threshold_name):
+    """Fits pct_above ~ oscillation + (1 | patient) for ONE (state,
+    threshold) combination. 'oscillation' is a factor: 'No oscillation'
+    (baseline, frame_index==0 of the at-peak series) vs 'Oscillation'
+    (cumulative - exceeds threshold at any point in the step). Returns
+    (long_df, no_osc_mean, osc_mean, p_value, model_kind, coef_df,
+    varcorr_df_or_None, sw_stat, sw_p, sw_label, qq_tuple)."""
+    threshold_df = osc_state_df[osc_state_df['threshold'] == threshold_name]
+    baseline = threshold_df[(threshold_df['metric'] == OSC_METRIC_AT_PEAK) &
+                             (threshold_df['frame_index'] == 0)].set_index('participant')['pct_above']
+    cumulative = threshold_df[threshold_df['metric'] == OSC_METRIC_CUMULATIVE].set_index(
+        'participant')['pct_above']
+    common = sorted(set(baseline.index) & set(cumulative.index))
+
+    long_rows = []
+    for p in common:
+        long_rows.append({'patient': 'P{}'.format(int(p)), 'oscillation': 'No oscillation',
+                           'pct_above': baseline.loc[p]})
+        long_rows.append({'patient': 'P{}'.format(int(p)), 'oscillation': 'Oscillation',
+                           'pct_above': cumulative.loc[p]})
+    long_df = pd.DataFrame(long_rows)
+
+    print("--- Oscillation data, threshold {} (patient x oscillation, N={}) ---".format(threshold_name, len(common)))
+    print(long_df.to_string(index=False))
+
+    # Guard: zero variance (every value identical, e.g. all 0.0 - nothing in
+    # either group ever reaches this threshold) crashes lmer()/summary() with
+    # a "not a positive definite matrix" error before isSingular() can even
+    # run. Not a fallback-worthy case like an ordinary singular fit - there
+    # is no model to fit at all, so report it descriptively instead.
+    if long_df['pct_above'].max() - long_df['pct_above'].min() < 1e-9:
+        no_osc_mean = float(long_df.loc[long_df['oscillation'] == 'No oscillation', 'pct_above'].mean())
+        osc_mean = float(long_df.loc[long_df['oscillation'] == 'Oscillation', 'pct_above'].mean())
+        coef_df = pd.DataFrame([{'Term': 'n/a', 'Note': 'All values identical ({:g}) - zero variance, '
+                                  'no model fit.'.format(no_osc_mean)}])
+        return (long_df, no_osc_mean, osc_mean, None, 'degenerate', coef_df, None,
+                None, None, 'n/a', None)
+
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['osc_data'] = ro.conversion.py2rpy(long_df)
+
+    print("")
+    print("--- Oscillation (threshold {}): pct_above ~ oscillation + (1 | patient) ---".format(threshold_name))
+    ro.r('''
+        osc_data$patient <- factor(osc_data$patient)
+        osc_data$oscillation <- factor(osc_data$oscillation, levels = c("No oscillation", "Oscillation"))
+        model_osc <- lmerTest::lmer(pct_above ~ oscillation + (1 | patient), data = osc_data)
+        print(summary(model_osc))
+        singular_osc <- isSingular(model_osc)
+    ''')
+    singular = bool(ro.r('singular_osc')[0])
+
+    wide = long_df.pivot(index='patient', columns='oscillation', values='pct_above')
+    no_osc_vals = wide['No oscillation'].values
+    osc_vals = wide['Oscillation'].values
+    no_osc_mean, osc_mean = float(no_osc_vals.mean()), float(osc_vals.mean())
+
+    if not singular:
+        print("  ==> Model used: LMM (random intercept not singular)")
+        ro.r('''
+            fe_osc <- fixef(model_osc)
+            no_osc_mean_r <- as.numeric(fe_osc['(Intercept)'])
+            osc_mean_r <- as.numeric(fe_osc['(Intercept)'] + fe_osc['oscillationOscillation'])
+            p_osc <- summary(model_osc)$coefficients['oscillationOscillation', 'Pr(>|t|)']
+            coef_osc <- get_coef_df(model_osc)
+            varcorr_osc <- get_varcorr_df(model_osc)
+        ''')
+        p_val = float(ro.r('p_osc')[0])
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            coef_df = ro.conversion.rpy2py(ro.r('coef_osc'))
+            varcorr_df = ro.conversion.rpy2py(ro.r('varcorr_osc'))
+        model_kind = 'lmm'
+        ro.r('osc_qq <- qqnorm(resid(model_osc), plot.it=FALSE)')
+        q1, q3 = list(ro.r('as.numeric(quantile(resid(model_osc), c(0.25, 0.75)))'))
+        ro.r('sw_osc <- shapiro.test(resid(model_osc))')
+        sw_label = 'residuals'
+    else:
+        print("  ==> Model used: paired t-test (LMM random intercept was singular - falling back)")
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            ro.globalenv['no_osc_vals'] = ro.FloatVector(no_osc_vals)
+            ro.globalenv['osc_vals'] = ro.FloatVector(osc_vals)
+        ro.r('''
+            tt_osc <- t.test(osc_vals, no_osc_vals, paired = TRUE)
+            print(tt_osc)
+            ttest_osc_df <- data.frame(
+                Term = "Oscillation - No oscillation", Estimate = as.numeric(tt_osc$estimate),
+                CI_low = tt_osc$conf.int[1], CI_high = tt_osc$conf.int[2],
+                df = tt_osc$parameter, t = tt_osc$statistic, `Pr(>|t|)` = tt_osc$p.value,
+                check.names = FALSE
+            )
+        ''')
+        p_val = float(ro.r('tt_osc$p.value')[0])
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            coef_df = ro.conversion.rpy2py(ro.r('ttest_osc_df'))
+        varcorr_df = None
+        model_kind = 'ttest'
+        diffs = osc_vals - no_osc_vals
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            ro.globalenv['osc_diffs'] = ro.FloatVector(diffs)
+        ro.r('osc_qq <- qqnorm(osc_diffs, plot.it=FALSE)')
+        q1, q3 = list(ro.r('as.numeric(quantile(osc_diffs, c(0.25, 0.75)))'))
+        ro.r('sw_osc <- shapiro.test(osc_diffs)')
+        sw_label = 'paired differences'
+
+    qq_theoretical = list(ro.r('osc_qq$x'))
+    qq_sample = list(ro.r('osc_qq$y'))
+    nq1, nq3 = list(ro.r('qnorm(c(0.25, 0.75))'))
+    qq_slope = (q3 - q1) / (nq3 - nq1)
+    qq_intercept = q1 - qq_slope * nq1
+    sw_stat = float(ro.r('sw_osc$statistic')[0])
+    sw_p = float(ro.r('sw_osc$p.value')[0])
+
+    return (long_df, no_osc_mean, osc_mean, p_val, model_kind, coef_df, varcorr_df,
+            sw_stat, sw_p, sw_label, (qq_theoretical, qq_sample, qq_slope, qq_intercept))
+
+
+def run_osc_lmm(osc_state_df, state_label, tag, thresholds):
+    """Fits pct_above ~ oscillation + (1|patient) separately for each
+    threshold in `thresholds` (per-state - PreOp uses 0.10/0.15, PostOp
+    uses 0.01/0.015, since PostOp's strain magnitude is much lower) - not
+    pooled, consistent with every other LMM in this codebase treating
+    different thresholds/conditions as separate tests. Saves an N-panel
+    boxplot (one per threshold, shared y-axis, spaghetti lines per patient).
+    Returns (markdown_section, results)."""
+    results = {}
+    for osc_threshold_name in thresholds:
+        (long_df, no_osc_mean, osc_mean, p_val, model_kind, coef_df, varcorr_df,
+         sw_stat, sw_p, sw_label, qq) = _fit_osc_exposure_model(osc_state_df, osc_threshold_name)
+        results[osc_threshold_name] = {
+            'df': long_df, 'no_osc_mean': no_osc_mean, 'osc_mean': osc_mean, 'p': p_val,
+            'model_kind': model_kind, 'coef_df': coef_df, 'varcorr_df': varcorr_df,
+            'shapiro': (sw_stat, sw_p, sw_label), 'qq': qq,
+        }
+
+    ymax = max(max(r['df']['pct_above'].max(), r['no_osc_mean'], r['osc_mean']) for r in results.values()) * 1.2
+    ymax = ymax if ymax > 0 else 1.0
+
+    fig, axes = plt.subplots(1, len(thresholds), figsize=(4.5 * len(thresholds), 5.5), sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, osc_threshold_name in zip(axes, thresholds):
+        r = results[osc_threshold_name]
+        no_osc_vals = r['df'][r['df']['oscillation'] == 'No oscillation']['pct_above']
+        osc_vals = r['df'][r['df']['oscillation'] == 'Oscillation']['pct_above']
+        box = ax.boxplot([no_osc_vals.values, osc_vals.values], positions=[0, 1], widths=0.35,
+                          showfliers=False, patch_artist=True, zorder=2)
+        for patch in box['boxes']:
+            patch.set_facecolor(to_rgba(TEAL, 0.4))
+            patch.set_edgecolor('black')
+            patch.set_linewidth(0.5)
+        for part in ('whiskers', 'caps', 'medians'):
+            for line in box[part]:
+                line.set_color('black')
+                line.set_linewidth(0.5)
+
+        wide = r['df'].pivot(index='patient', columns='oscillation', values='pct_above')
+        for _, row in wide.iterrows():
+            ax.plot([0, 1], [row['No oscillation'], row['Oscillation']],
+                    color='grey', linewidth=0.6, alpha=0.5, zorder=2.5)
+
+        ax.scatter([0] * len(no_osc_vals), no_osc_vals.values, color=NAVY, s=25, alpha=0.7, marker='o', zorder=3)
+        ax.scatter([1] * len(osc_vals), osc_vals.values, color=NAVY, s=25, alpha=0.7, marker='o', zorder=3)
+        ax.scatter([0, 1], [r['no_osc_mean'], r['osc_mean']], marker='d', s=80, facecolor='red',
+                   edgecolor='black', linewidth=1.5, zorder=5)
+
+        if r['model_kind'] == 'degenerate':
+            model_label = 'no variance'
+            ax.text(0.5, 0.9 * ymax, 'All values identical', ha='center', va='top', fontsize=9, style='italic')
         else:
-            osc_ax.scatter(osc_xs, osc_grp['pct_above'], facecolors='none', edgecolors=osc_color, marker='o',
-                            s=55, linewidths=1.3, zorder=3)
+            p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
+            bracket_y, tick = 0.83 * ymax, 0.02 * ymax
+            ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+                    color='black', linewidth=1.2, zorder=6)
+            ax.text(0.5, bracket_y + 0.015 * ymax, p_label, ha='center', va='bottom', fontsize=10)
+            model_label = 'LMM' if r['model_kind'] == 'lmm' else 'paired t-test'
 
-osc_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
-                                 label='{:.2f}'.format(val))
-                          for name, val in OSC_CUM_PEAK_DISPLAY_THRESHOLDS.items()]
-osc_metric_handles = [
-    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='Cumulative (ever exceeds)'),
-    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='At-peak (worst single frame)'),
-]
-osc_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['No\noscillation', 'Oscillation'])
+        ax.set_xlabel('Threshold {:g}\nn={} ({})'.format(
+            thresholds[osc_threshold_name], r['df']['patient'].nunique(), model_label))
+        ax.set_ylim(0, ymax)
 
-osc_all_handles = (
-    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_threshold_handles +
-    [osc_blank] +
-    [Line2D([0], [0], linestyle='none', marker='None', label='Metric')] + osc_metric_handles
-)
-osc_ax.legend(handles=osc_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+    axes[0].set_ylabel('% cord volume above threshold')
+    mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
+                           label='Mean / estimate')]
+    axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
+    fig.suptitle('Oscillation ({}): No oscillation vs Oscillation'.format(state_label))
+    fig.tight_layout()
+    box_path = os.path.join(STAGE3_RESULTS_DIR, 'lmm_oscillation_boxplot_{}.pdf'.format(tag))
+    fig.savefig(box_path, bbox_inches='tight')
+    plt.close(fig)
+    print("  Plot saved: {}".format(box_path))
 
-osc_ax.set_xticks(range(len(osc_participants)))
-osc_ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in osc_participants])
-osc_ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                 xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-osc_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
-osc_ax.set_ylabel('% cord volume above threshold')
-osc_ax.set_title('Oscillation: cumulative (ever-exceeds) vs. at-peak (simultaneous) % cord volume')
-osc_fig.tight_layout()
+    sections = []
+    for osc_threshold_name in thresholds:
+        osc_threshold_val = thresholds[osc_threshold_name]
+        r = results[osc_threshold_name]
 
-osc_plot_path = os.path.join(
-    STAGE3_RESULTS_DIR, 'multipatient_mps_plot_oscillation_cumulative_vs_peak_sortedbypreopmJOA.pdf')
-osc_fig.savefig(osc_plot_path, bbox_inches='tight')
-plt.close(osc_fig)
+        if r['model_kind'] == 'degenerate':
+            sections.append("""\
+#### Threshold {threshold:g}
 
-print()
-print("Summary saved: {}".format(osc_summary_path))
-print("Plot saved: {}".format(osc_plot_path))
-
-# ============================================================
-# Plot 2: Delta (At-peak worst single frame MINUS Baseline) % cord volume
-# above threshold. Baseline is the pre-oscillation starting state
-# (frame_index==0 of the same Step-3, i.e. preload only, before any
-# oscillation displacement) - already in osc_cache_df as the frame_index==0
-# rows of the OSC_METRIC_AT_PEAK per-frame series.
-# ============================================================
-osc_delta_records = []
-for osc_p in osc_target_participants:
-    osc_p_label = 'P{}'.format(osc_p)
-    for osc_name in OSC_DELTA_DISPLAY_THRESHOLDS:
-        osc_peak_rows = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
-                                      (osc_cache_df['metric'] == OSC_METRIC_AT_PEAK) &
-                                      (osc_cache_df['threshold'] == osc_name)]
-        osc_base_row = osc_peak_rows[osc_peak_rows['frame_index'] == 0]
-        if osc_peak_rows.empty or osc_base_row.empty:
+All patients show % cord volume above MPS ${threshold:g}$ = {value:g} for both No oscillation \
+and Oscillation, for {state} - zero variance, no model fit (nothing to test).
+""".format(threshold=osc_threshold_val, state=state_label, value=r['no_osc_mean']))
             continue
-        osc_at_peak_pct = osc_peak_rows['pct_above'].max()
-        osc_baseline_pct = osc_base_row['pct_above'].iloc[0]
-        osc_delta_records.append({
-            'participant': osc_p_label,
-            'threshold': osc_name,
-            'pct_above_baseline': osc_baseline_pct,
-            'pct_above_at_peak': osc_at_peak_pct,
-            'delta_at_peak_minus_baseline': osc_at_peak_pct - osc_baseline_pct,
-        })
-osc_delta_summary = pd.DataFrame(osc_delta_records)
 
-osc_delta_summary_path = os.path.join(
-    STAGE3_RESULTS_DIR, 'multipatient_mps_summary_oscillation_delta_at_peak_vs_baseline.csv')
-osc_delta_summary.to_csv(osc_delta_summary_path, index=False)
-print(osc_delta_summary.to_string(index=False))
+        sw_stat, sw_p, sw_label = r['shapiro']
+        sw_flag = ' (deviates from normality)' if sw_p < 0.05 else ''
+        sw_line = "\n\n**Shapiro-Wilk ({})**: W = {:.4g}, p = {:.4g}{}".format(sw_label, sw_stat, sw_p, sw_flag)
 
-print()
-print("Mean/median delta (at-peak - baseline) by threshold:")
-print(osc_delta_summary.groupby('threshold')['delta_at_peak_minus_baseline'].agg(['mean', 'median']).to_string())
+        if r['model_kind'] == 'lmm':
+            model_note = "**Model used: linear mixed-effects model** (random intercept not singular)."
+            hypothesis = (
+                "$$y_i = \\beta_0 + \\beta_{\\text{oscillation}}\\,"
+                "\\mathbb{1}[\\text{oscillation}_i=\\text{Oscillation}] + u_i + \\varepsilon_i$$"
+                "\n\n$$H_0:\\ \\beta_{\\text{oscillation}} = 0$$"
+            )
+            extra = "\n\n{}{}".format(format_random_effects_md(r['varcorr_df']), sw_line)
+        else:
+            model_note = ("**Model used: paired t-test** (LMM random-intercept variance was singular - "
+                           "adds nothing over a plain paired comparison).")
+            hypothesis = (
+                "$$H_0:\\ \\mu_{\\Delta} = 0, \\quad \\Delta_i = \\text{pct\\_above}_{i,\\text{Oscillation}} "
+                "- \\text{pct\\_above}_{i,\\text{No oscillation}}$$"
+            )
+            extra = sw_line
 
-osc_delta_min = osc_delta_summary['delta_at_peak_minus_baseline'].min()
-osc_delta_max = osc_delta_summary['delta_at_peak_minus_baseline'].max()
-osc_delta_pad = 0.1 * max(abs(osc_delta_min), abs(osc_delta_max), 1e-9)
-osc_delta_ylim = (osc_delta_min - osc_delta_pad, osc_delta_max + osc_delta_pad)
+        sections.append("""\
+#### Threshold {threshold:g}
 
-osc_delta_fig, osc_delta_ax = plt.subplots(figsize=(8, 5.5))
+{model_note}
 
-for osc_name in OSC_DELTA_DISPLAY_THRESHOLDS:
-    osc_col_df = osc_delta_summary[osc_delta_summary['threshold'] == osc_name]
-    osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
-    osc_xs = [osc_x_pos[p] for p in osc_col_df['participant']]
-    # alpha<1 so overlapping points (common here - many patients cluster near
-    # delta=0) show as visibly darker/stacked instead of hiding each other.
-    osc_delta_ax.scatter(osc_xs, osc_col_df['delta_at_peak_minus_baseline'], color=osc_color, marker='o', s=55,
-                          alpha=1, edgecolors='none', zorder=3)
+{hypothesis}
 
-osc_delta_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
-osc_delta_ax.set_ylim(osc_delta_ylim)
-osc_delta_ax.set_xticks(range(len(osc_participants)))
-osc_delta_ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in osc_participants])
-osc_delta_ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                       xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-osc_delta_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
-osc_delta_ax.set_ylabel('Δ % cord volume above threshold\n(At-peak - Baseline)')
-osc_delta_ax.set_title('Oscillation: Δ % cord volume above threshold, worst single frame vs. pre-oscillation baseline')
+No difference in % of cord volume that exceeds MPS $={threshold:g}$ at any point during the \
+oscillation step, compared to the pre-oscillation baseline (frame 0), for {state}.
 
-osc_delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
-                                       label='{:.2f}'.format(val))
-                                for name, val in OSC_DELTA_DISPLAY_THRESHOLDS.items()]
-osc_delta_ax.legend(
-    handles=[Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_delta_threshold_handles,
-    loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+{coef_table}{extra}
+""".format(threshold=osc_threshold_val, state=state_label, model_note=model_note, hypothesis=hypothesis,
+           coef_table=r_table_to_markdown_from_df(r['coef_df']), extra=extra))
 
-osc_delta_fig.tight_layout()
+    return "\n".join(sections), results
 
-osc_delta_plot_path = os.path.join(
-    STAGE3_RESULTS_DIR, 'multipatient_mps_plot_oscillation_delta_at_peak_vs_baseline_sortedbypreopmJOA.pdf')
-osc_delta_fig.savefig(osc_delta_plot_path, bbox_inches='tight')
-plt.close(osc_delta_fig)
 
-print()
-print("Summary saved: {}".format(osc_delta_summary_path))
-print("Plot saved: {}".format(osc_delta_plot_path))
+osc_lmm_results_by_state = {}
+osc_lmm_sections_by_state = {}
+for osc_state in OSC_STATES:
+    osc_state_df_lmm = osc_cache_df[osc_cache_df['state'] == osc_state]
+    osc_section, osc_results = run_osc_lmm(
+        osc_state_df_lmm, osc_state, osc_state.lower(), OSC_THRESHOLDS_BY_STATE[osc_state])
+    osc_lmm_results_by_state[osc_state] = osc_results
+    osc_lmm_sections_by_state[osc_state] = osc_section
+
+# Tabulated at-a-glance summary, one row per (state, threshold), before the
+# detailed per-threshold sections below.
+osc_table_lines = [
+    "| State | Threshold | No oscillation (mean) | Oscillation (mean) | Delta | Model | p-value | "
+    "Shapiro-Wilk p |",
+    "|---|---|---|---|---|---|---|---|",
+]
+for osc_state in OSC_STATES:
+    for osc_threshold_name, osc_threshold_val in OSC_THRESHOLDS_BY_STATE[osc_state].items():
+        r = osc_lmm_results_by_state[osc_state][osc_threshold_name]
+        if r['model_kind'] == 'degenerate':
+            osc_table_lines.append("| {} | {:g} | {:g} | {:g} | 0 | n/a (zero variance) | n/a | n/a |".format(
+                osc_state, osc_threshold_val, r['no_osc_mean'], r['osc_mean']))
+            continue
+        osc_model_label = 'LMM' if r['model_kind'] == 'lmm' else 'paired t-test'
+        osc_p_str = '<0.001' if r['p'] < 0.001 else '{:.3f}'.format(r['p'])
+        osc_sw_p_str = '{:.3f}'.format(r['shapiro'][1])
+        osc_table_lines.append("| {} | {:g} | {:.2f} | {:.2f} | {:+.2f} | {} | {} | {} |".format(
+            osc_state, osc_threshold_val, r['no_osc_mean'], r['osc_mean'],
+            r['osc_mean'] - r['no_osc_mean'], osc_model_label, osc_p_str, osc_sw_p_str))
+osc_table_md = "\n".join(osc_table_lines)
+
+OSC_PREAMBLE = """\
+Patient is a random intercept; thresholds are fit as separate models, not \
+pooled. Oscillation has no Flexion/Extension split (it is its own single \
+loading mode, not crossed with condition), unlike every other LMM in this \
+codebase - so there is no loading-condition covariate here. Satterthwaite-df \
+t-tests (R `lme4`/`lmerTest`), not asymptotic z.
+"""
+
+summary_md_osc = (
+    "### Oscillation vs no-oscillation - effect on MPS\n\n" + OSC_PREAMBLE + "\n" +
+    osc_table_md + "\n\n" +
+    "\n".join("### {}\n\n{}".format(osc_state, osc_lmm_sections_by_state[osc_state])
+              for osc_state in OSC_STATES)
+)
+summary_md_osc_path = os.path.join(STAGE3_RESULTS_DIR, 'lmm_summary_oscillation.md')
+with open(summary_md_osc_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_osc)
+print("")
+print("Summary saved: {}".format(summary_md_osc_path))
+
+# Combined QQ grid across both states - each state's own threshold columns
+# (different per state), positional per row. Degenerate (zero-variance)
+# results have no residuals/QQ to show, so they're skipped (that panel
+# renders blank rather than erroring).
+osc_qq_entries = []
+for osc_state in OSC_STATES:
+    for osc_threshold_name, osc_threshold_val in OSC_THRESHOLDS_BY_STATE[osc_state].items():
+        r = osc_lmm_results_by_state[osc_state][osc_threshold_name]
+        if r['qq'] is None:
+            continue
+        osc_qq_entries.append((osc_state, 'Threshold {:g}'.format(osc_threshold_val), r['qq'],
+                               r['shapiro'][0], r['shapiro'][1]))
+
+osc_qq_grid_path = os.path.join(STAGE3_DIAG_DIR, 'lmm_oscillation_residual_qq_combined.pdf')
+save_gmvswm_qq_grid(osc_qq_entries, osc_qq_grid_path)
