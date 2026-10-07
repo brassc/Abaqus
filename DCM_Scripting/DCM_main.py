@@ -802,10 +802,12 @@ print("PART C: Whole-cord LMM, PreOp-NoPreload vs PostOp, threshold=0.015")
 print("=" * 70)
 
 # ============================================================
-# Linear mixed-effects tests (R's lme4/lmerTest via rpy2 - Satterthwaite
-# t-tests, not the asymptotic z-tests statsmodels gives). Patient is a
-# random intercept. Imported here (rather than at module top) so Parts A
-# and B above complete and save their output even if R/rpy2 isn't set up.
+# Linear mixed-effects tests (R's lme4/lmerTest via rpy2 - Kenward-Roger-
+# corrected t-tests, not Satterthwaite or the asymptotic z-tests statsmodels
+# gives - N=12 patients is small enough that KR's bias correction to the
+# fixed-effect covariance matrix matters). Patient is a random intercept.
+# Imported here (rather than at module top) so Parts A and B above complete
+# and save their output even if R/rpy2 isn't set up.
 # ============================================================
 os.environ.setdefault('R_HOME', r'C:\Program Files\R\R-4.6.1')
 os.environ.setdefault('R_LIBS_USER', os.path.join(os.path.expanduser('~'), 'Documents', 'R', 'win-library', '4.6'))
@@ -843,8 +845,8 @@ def r_table_to_markdown_from_df(df):
 
 
 ro.r('''
-    get_coef_df <- function(model) {
-        df <- as.data.frame(coef(summary(model)))
+    get_coef_df <- function(model, ddf = "Kenward-Roger") {
+        df <- as.data.frame(coef(summary(model, ddf = ddf)))
         df <- cbind(Term = rownames(df), df)
         rownames(df) <- NULL
         df
@@ -913,7 +915,7 @@ def _fit_one_condition_state_model(df, condition, threshold):
         wc_data$patient <- factor(wc_data$patient)
         wc_data$state   <- factor(wc_data$state, levels = c("PreOp (no preload)", "PostOp"))
         model_wc <- lmerTest::lmer(pct_above ~ state + (1 | patient), data = wc_data)
-        print(summary(model_wc))
+        print(summary(model_wc, ddf = "Kenward-Roger"))
         singular_wc <- isSingular(model_wc)
     ''')
     singular = bool(ro.r('singular_wc')[0])
@@ -928,7 +930,7 @@ def _fit_one_condition_state_model(df, condition, threshold):
             fe_wc <- fixef(model_wc)
             pre_mean_wc <- as.numeric(fe_wc['(Intercept)'])
             post_mean_wc <- as.numeric(fe_wc['(Intercept)'] + fe_wc['statePostOp'])
-            p_wc <- summary(model_wc)$coefficients['statePostOp', 'Pr(>|t|)']
+            p_wc <- summary(model_wc, ddf = "Kenward-Roger")$coefficients['statePostOp', 'Pr(>|t|)']
             coef_wc <- get_coef_df(model_wc)
             varcorr_wc <- get_varcorr_df(model_wc)
         ''')
@@ -1802,8 +1804,10 @@ PREAMBLE = """\
 Patient is a random intercept; loading condition (Flexion/Extension) is kept \
 as its own main-effect covariate rather than averaged away - they differ \
 hugely in magnitude, so averaging would blend two different mechanical \
-regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), \
-not asymptotic z.
+regimes into one number. Kenward-Roger-corrected t-tests (R `lme4`/`lmerTest`/`pbkrtest`) \
+- not Satterthwaite (df-only correction) or asymptotic z - since N=12 patients is small \
+enough that Kenward-Roger's extra bias-correction to the fixed-effect covariance matrix \
+matters (recommended below ~30 clusters).
 """
 
 
@@ -1832,13 +1836,13 @@ def _fit_one_condition_tissue_model(elements_df, condition, threshold):
         gmvswm_data$patient <- factor(gmvswm_data$patient)
         gmvswm_data$tissue  <- factor(gmvswm_data$tissue, levels = c("GM", "WM"))
         gmvswm_model <- lmerTest::lmer(pct_above ~ tissue + (1 | patient), data = gmvswm_data)
-        print(summary(gmvswm_model))
+        print(summary(gmvswm_model, ddf = "Kenward-Roger"))
     ''')
     ro.r('''
         gmvswm_fe <- fixef(gmvswm_model)
         gm_mean <- as.numeric(gmvswm_fe['(Intercept)'])
         wm_mean <- as.numeric(gmvswm_fe['(Intercept)'] + gmvswm_fe['tissueWM'])
-        gmvswm_p <- summary(gmvswm_model)$coefficients['tissueWM', 'Pr(>|t|)']
+        gmvswm_p <- summary(gmvswm_model, ddf = "Kenward-Roger")$coefficients['tissueWM', 'Pr(>|t|)']
         coef_df <- get_coef_df(gmvswm_model)
         varcorr_df <- get_varcorr_df(gmvswm_model)
     ''')
@@ -2813,7 +2817,7 @@ def _fit_osc_exposure_model(osc_state_df, threshold_name):
         osc_data$patient <- factor(osc_data$patient)
         osc_data$oscillation <- factor(osc_data$oscillation, levels = c("No oscillation", "Oscillation"))
         model_osc <- lmerTest::lmer(pct_above ~ oscillation + (1 | patient), data = osc_data)
-        print(summary(model_osc))
+        print(summary(model_osc, ddf = "Kenward-Roger"))
         singular_osc <- isSingular(model_osc)
     ''')
     singular = bool(ro.r('singular_osc')[0])
@@ -2829,7 +2833,7 @@ def _fit_osc_exposure_model(osc_state_df, threshold_name):
             fe_osc <- fixef(model_osc)
             no_osc_mean_r <- as.numeric(fe_osc['(Intercept)'])
             osc_mean_r <- as.numeric(fe_osc['(Intercept)'] + fe_osc['oscillationOscillation'])
-            p_osc <- summary(model_osc)$coefficients['oscillationOscillation', 'Pr(>|t|)']
+            p_osc <- summary(model_osc, ddf = "Kenward-Roger")$coefficients['oscillationOscillation', 'Pr(>|t|)']
             coef_osc <- get_coef_df(model_osc)
             varcorr_osc <- get_varcorr_df(model_osc)
         ''')
@@ -3045,8 +3049,10 @@ OSC_PREAMBLE = """\
 Patient is a random intercept; thresholds are fit as separate models, not \
 pooled. Oscillation has no Flexion/Extension split (it is its own single \
 loading mode, not crossed with condition), unlike every other LMM in this \
-codebase - so there is no loading-condition covariate here. Satterthwaite-df \
-t-tests (R `lme4`/`lmerTest`), not asymptotic z.
+codebase - so there is no loading-condition covariate here. Kenward-Roger-corrected \
+t-tests (R `lme4`/`lmerTest`/`pbkrtest`) - not Satterthwaite or asymptotic z - since \
+N=12 patients is small enough that Kenward-Roger's extra bias-correction to the \
+fixed-effect covariance matrix matters (recommended below ~30 clusters).
 """
 
 summary_md_osc = (

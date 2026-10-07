@@ -1,6 +1,6 @@
 ### GM/WM linear mixed-effects model - PreOp with preload (threshold = 0.15)
 
-Patient is a random intercept; loading condition (Flexion/Extension) is kept as its own main-effect covariate rather than averaged away - they differ hugely in magnitude, so averaging would blend two different mechanical regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), not asymptotic z.
+Patient is a random intercept; loading condition (Flexion/Extension) is kept as its own main-effect covariate rather than averaged away - they differ hugely in magnitude, so averaging would blend two different mechanical regimes into one number. Kenward-Roger-corrected t-tests (R `lme4`/`lmerTest`/`pbkrtest`) - not Satterthwaite (df-only correction) or asymptotic z - since N=12 patients is small enough that Kenward-Roger's extra bias-correction to the fixed-effect covariance matrix matters (recommended below ~30 clusters).
 
 #### GM vs WM (Flexion)
 

@@ -1,6 +1,6 @@
 ### Oscillation vs no-oscillation - effect on MPS
 
-Patient is a random intercept; thresholds are fit as separate models, not pooled. Oscillation has no Flexion/Extension split (it is its own single loading mode, not crossed with condition), unlike every other LMM in this codebase - so there is no loading-condition covariate here. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), not asymptotic z.
+Patient is a random intercept; thresholds are fit as separate models, not pooled. Oscillation has no Flexion/Extension split (it is its own single loading mode, not crossed with condition), unlike every other LMM in this codebase - so there is no loading-condition covariate here. Kenward-Roger-corrected t-tests (R `lme4`/`lmerTest`/`pbkrtest`) - not Satterthwaite or asymptotic z - since N=12 patients is small enough that Kenward-Roger's extra bias-correction to the fixed-effect covariance matrix matters (recommended below ~30 clusters).
 
 | State | Threshold | No oscillation (mean) | Oscillation (mean) | Delta | Model | p-value | Shapiro-Wilk p |
 |---|---|---|---|---|---|---|---|
