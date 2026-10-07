@@ -49,13 +49,14 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Must match the FRAME_MODE the caches were generated with (selects the cache files).
 FRAME_MODE = 'peak'
 
-PPBLOB_THRESHOLDS = {'t0p01': 0.01, 't0p02': 0.02, 't0p03': 0.03, 't0p04': 0.04, 't0p05': 0.05}
+PPBLOB_THRESHOLDS = {'t0p01': 0.01, 't0p015': 0.015, 't0p02': 0.02, 't0p025': 0.025, 't0p03': 0.03, 't0p035': 0.035}
 PPBLOB_THRESHOLD_COLORS = {
-    't0p01': '#2a78d6',   # blue
-    't0p02': '#eb6834',   # orange
-    't0p03': '#1baf7a',   # aqua
-    't0p04': '#e34948',   # red
-    't0p05': '#4a3aa7',   # violet
+    't0p01': '#2a78d6',    # blue
+    't0p015': '#1baf7a',   # aqua
+    't0p02': '#eb6834',    # orange
+    't0p025': '#e34948',   # red
+    't0p03': '#4a3aa7',    # violet
+    't0p035': '#8c8c8c',   # grey
 }
 
 CONDITION_MARKERS = {'flexion': 's', 'extension': '^'}
@@ -328,7 +329,7 @@ def pp_plot_threshold(ax, threshold_name, state_name):
     ax.set_ylim(pp_ylim)
     ax.xaxis.set_major_locator(PP_LOG_MAJOR_LOCATOR)
     ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
-    ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), PPBLOB_THRESHOLDS[threshold_name]))
+    ax.set_title('Threshold {} = {:g}'.format(threshold_name.upper(), PPBLOB_THRESHOLDS[threshold_name]))
     ax.set_xlabel('MPS concentration effective radius r (mm)')
     ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
 
@@ -424,7 +425,7 @@ def make_ppblob_scalar_plot(metric_col, ylabel, title, out_suffix):
         ax.set_title(DELTA_STATE_TITLES[state_name])
 
     threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=PPBLOB_THRESHOLD_COLORS[name],
-                                 label='{:.2f}'.format(val))
+                                 label='{:g}'.format(val))
                           for name, val in PPBLOB_THRESHOLDS.items()]
     condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                           for cond, marker in CONDITION_MARKERS.items()]
