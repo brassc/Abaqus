@@ -2214,32 +2214,41 @@ preop_elements, preop_summary = run_dataset(
 
 print("")
 print("=" * 70)
-print("PART H (cont.): GM vs WM LMM, PreOp (with preload), threshold=0.15")
+print("PART H (cont.): GM vs WM LMM, PreOp (with preload), thresholds=0.10/0.15")
 print("=" * 70)
 
 # Reuses _fit_one_condition_tissue_model/run_gmvswm_lmm/save_gmvswm_qq_grid/
 # PREAMBLE defined in Stage 1's Part F above - only out_dir/diag_dir differ.
-# Threshold is 0.15 here (not 0.015 as in Stage 1) - PreOp WITH preload has
-# much higher-magnitude strain, so the lower Stage-1 cutoff isn't appropriate.
-gmvswm_section_preop_t15, gmvswm_results_preop = run_gmvswm_lmm(
-    preop_elements, 'preop_t0p15', 'PreOp with Preload (threshold=0.15)',
-    threshold=0.15, out_dir=STAGE2_RESULTS_DIR)
+# Run at both 0.10 and 0.15 (not 0.015 as in Stage 1) - PreOp WITH preload
+# has much higher-magnitude strain, so the lower Stage-1 cutoff isn't
+# appropriate; 0.10/0.15 matches the tissue-boundary-enrichment thresholds
+# already used for this same cohort above.
+gmvswm_results_preop_by_threshold = {}
+for gmvswm_threshold_name, gmvswm_threshold_val in (('t0p10', 0.10), ('t0p15', 0.15)):
+    gmvswm_section_preop, gmvswm_results_preop = run_gmvswm_lmm(
+        preop_elements, 'preop_{}'.format(gmvswm_threshold_name),
+        'PreOp with Preload (threshold={:g})'.format(gmvswm_threshold_val),
+        threshold=gmvswm_threshold_val, out_dir=STAGE2_RESULTS_DIR)
+    gmvswm_results_preop_by_threshold[gmvswm_threshold_name] = gmvswm_results_preop
 
-summary_md_preop_t15 = (
-    "### GM/WM linear mixed-effects model - PreOp with preload (threshold = 0.15)\n\n"
-    + PREAMBLE + "\n" + gmvswm_section_preop_t15
-)
-summary_md_preop_t15_path = os.path.join(STAGE2_RESULTS_DIR, 'lmm_summary_preop_t0p15.md')
-with open(summary_md_preop_t15_path, 'w', encoding='utf-8') as f:
-    f.write(summary_md_preop_t15)
-print("")
-print("Summary saved: {}".format(summary_md_preop_t15_path))
+    summary_md_preop = (
+        "### GM/WM linear mixed-effects model - PreOp with preload (threshold = {:g})\n\n".format(
+            gmvswm_threshold_val)
+        + PREAMBLE + "\n" + gmvswm_section_preop
+    )
+    summary_md_preop_path = os.path.join(STAGE2_RESULTS_DIR, 'lmm_summary_preop_{}.md'.format(gmvswm_threshold_name))
+    with open(summary_md_preop_path, 'w', encoding='utf-8') as f:
+        f.write(summary_md_preop)
+    print("")
+    print("Summary saved: {}".format(summary_md_preop_path))
 
+# Combined QQ grid across both thresholds (rows = threshold, cols = condition).
 gmvswm_qq_entries_stage2 = []
-for gmvswm_condition in ('Flexion', 'Extension'):
-    gmvswm_r = gmvswm_results_preop[gmvswm_condition]
-    gmvswm_qq_entries_stage2.append(('PreOp (with preload)', gmvswm_condition, gmvswm_r['qq'],
-                                      gmvswm_r['shapiro'][0], gmvswm_r['shapiro'][1]))
+for gmvswm_threshold_name, gmvswm_threshold_label in (('t0p10', 'Threshold 0.10'), ('t0p15', 'Threshold 0.15')):
+    for gmvswm_condition in ('Flexion', 'Extension'):
+        gmvswm_r = gmvswm_results_preop_by_threshold[gmvswm_threshold_name][gmvswm_condition]
+        gmvswm_qq_entries_stage2.append((gmvswm_threshold_label, gmvswm_condition, gmvswm_r['qq'],
+                                          gmvswm_r['shapiro'][0], gmvswm_r['shapiro'][1]))
 
 gmvswm_qq_grid_path_stage2 = os.path.join(STAGE2_DIAG_DIR, 'lmm_gmvswm_residual_qq_combined.pdf')
 save_gmvswm_qq_grid(gmvswm_qq_entries_stage2, gmvswm_qq_grid_path_stage2)
