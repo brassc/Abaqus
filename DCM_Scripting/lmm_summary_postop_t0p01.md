@@ -1,4 +1,4 @@
-# GM/WM linear mixed-effects model - PostOp (threshold = 0.02)
+# GM/WM linear mixed-effects model - PostOp (threshold = 0.01)
 
 Patient is a random intercept; loading condition (Flexion/Extension) is kept as its own main-effect covariate rather than averaged away - they differ hugely in magnitude, so averaging would blend two different mechanical regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), not asymptotic z.
 
@@ -16,23 +16,23 @@ $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}]
 
 $$H_0:\ \beta_{\text{tissueWM}} = 0$$
 
-No difference in % of cord volume above MPS $=0.02$ between grey and white matter, within Flexion (not pooled with Extension).
+No difference in % of cord volume above MPS $=0.01$ between grey and white matter, within Flexion (not pooled with Extension).
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 4.232 | 2.651 | 13.12 | 1.597 | 0.1342 |
-| tissueWM | 5.647 | 1.578 | 11 | 3.579 | 0.004324 |
+| (Intercept) | 9.82 | 4.199 | 11.74 | 2.339 | 0.03791 |
+| tissueWM | 6.164 | 1.514 | 11 | 4.072 | 0.001844 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 69.37 | 8.329 |
-| Residual | 14.94 | 3.865 |
+| patient | 197.8 | 14.06 |
+| Residual | 13.75 | 3.708 |
 
-**ICC = 0.823**
+**ICC = 0.935**
 
-**Shapiro-Wilk (residuals)**: W = 0.928, p = 0.08817
+**Shapiro-Wilk (residuals)**: W = 0.8755, p = 0.006744 (residuals deviate from normality)
 
 ## Model 1 (Extension): GM vs WM
 
@@ -48,20 +48,20 @@ $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}]
 
 $$H_0:\ \beta_{\text{tissueWM}} = 0$$
 
-No difference in % of cord volume above MPS $=0.02$ between grey and white matter, within Extension (not pooled with Flexion).
+No difference in % of cord volume above MPS $=0.01$ between grey and white matter, within Extension (not pooled with Flexion).
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 2.033 | 1.807 | 12.19 | 1.125 | 0.2822 |
-| tissueWM | 1.544 | 0.8188 | 11 | 1.886 | 0.08592 |
+| (Intercept) | 3.355 | 2.666 | 11.55 | 1.258 | 0.2331 |
+| tissueWM | 1.733 | 0.8295 | 11 | 2.089 | 0.06074 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 35.14 | 5.928 |
-| Residual | 4.023 | 2.006 |
+| patient | 81.17 | 9.01 |
+| Residual | 4.128 | 2.032 |
 
-**ICC = 0.897**
+**ICC = 0.952**
 
-**Shapiro-Wilk (residuals)**: W = 0.795, p = 0.0002439 (residuals deviate from normality)
+**Shapiro-Wilk (residuals)**: W = 0.8106, p = 0.0004405 (residuals deviate from normality)

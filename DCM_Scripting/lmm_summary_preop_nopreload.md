@@ -32,6 +32,8 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 
 **ICC = 0.871**
 
+**Shapiro-Wilk (residuals)**: W = 0.9792, p = 0.8806
+
 ## Model 1 (Extension): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
@@ -61,3 +63,5 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 | Residual | 7.062 | 2.658 |
 
 **ICC = 0.141**
+
+**Shapiro-Wilk (residuals)**: W = 0.9546, p = 0.3398

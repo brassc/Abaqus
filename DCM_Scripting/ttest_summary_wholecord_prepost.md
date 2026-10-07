@@ -12,6 +12,8 @@ No difference in % of whole cord volume above MPS $=0.02$ between PreOp (no prel
 |---|---|---|---|---|---|---|
 | PostOp - PreOp (no preload) | -9.713 | -20.28 | 0.8492 | 11 | -2.024 | 0.06795 |
 
+**Shapiro-Wilk (paired differences)**: W = 0.9483, p = 0.6117
+
 ## Whole cord (Extension): PreOp (no preload) vs PostOp
 
 $$H_0:\ \mu_{\Delta} = 0, \quad \Delta_i = \text{pct\_above}_{i,\text{PostOp}} - \text{pct\_above}_{i,\text{PreOp}}$$
@@ -21,3 +23,5 @@ No difference in % of whole cord volume above MPS $=0.02$ between PreOp (no prel
 | Term | Estimate | CI_low | CI_high | df | t | Pr(>\|t\|) |
 |---|---|---|---|---|---|---|
 | PostOp - PreOp (no preload) | -0.5652 | -5.502 | 4.371 | 11 | -0.252 | 0.8057 |
+
+**Shapiro-Wilk (paired differences)**: W = 0.7705, p = 0.004413 (differences deviate from normality)

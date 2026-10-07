@@ -522,8 +522,10 @@ def run_model1_lmm(elements_df, tag, title_prefix, threshold=LMM_THRESHOLD, ymax
             pdf(model1_qq_path, width = 5, height = 5)
             qqnorm(resid(model1), main = "Model 1 ({}) residual Q-Q"); qqline(resid(model1), col = "red")
             dev.off()
-            cat("Model 1 ({}) Shapiro-Wilk: "); print(shapiro.test(resid(model1)))
+            sw1 <- shapiro.test(resid(model1))
+            cat("Model 1 ({}) Shapiro-Wilk: "); print(sw1)
         '''.format(condition, condition))
+        results[condition]['shapiro'] = (float(ro.r('sw1$statistic')[0]), float(ro.r('sw1$p.value')[0]))
         print("  Plot saved: {}".format(qq_path))
 
     if ymax is None:
@@ -596,10 +598,14 @@ matter, within {condition} ({pct_lbl}).
 {coef_table}
 
 {random_effects}
+
+**Shapiro-Wilk (residuals)**: W = {sw_stat:.4g}, p = {sw_p:.4g}{sw_flag}
 """.format(condition=condition, threshold=threshold,
            pct_lbl='not pooled with Extension' if condition == 'Flexion' else 'not pooled with Flexion',
            coef_table=r_table_to_markdown_from_df(r['coef_df']),
-           random_effects=format_random_effects_md(r['varcorr_df'])))
+           random_effects=format_random_effects_md(r['varcorr_df']),
+           sw_stat=r['shapiro'][0], sw_p=r['shapiro'][1],
+           sw_flag=' (residuals deviate from normality)' if r['shapiro'][1] < 0.05 else ''))
 
     return "\n".join(sections)
 
@@ -617,80 +623,89 @@ print("")
 print("=== Linear mixed-effects models: PreOp (with preload), threshold=0.10 ===")
 model1_section_preop = run_model1_lmm(preop_elements, 'preop', 'PreOp with Preload', ymax=70)
 
-# Model 2 data: tissue x region, from the summary table already built
-# above - fit SEPARATELY per condition (Flexion/Extension are different
-# mechanical regimes, not pooled with a covariate - see run_model1_lmm).
-model2_sections = []
-for condition in ('Flexion', 'Extension'):
-    m2_df = (preop_summary[(preop_summary['threshold'] == 't0p10')
-                           & (preop_summary['loading_condition'] == condition)]
-             .rename(columns={'participant': 'patient'})
-             [['patient', 'tissue', 'region', 'pct_above']]
-             .dropna(subset=['pct_above']))
-
-    print("")
-    print("--- Model 2 data, {} (patient x tissue x region, N={}) ---".format(
-        condition, m2_df['patient'].nunique()))
-    print(m2_df.to_string(index=False))
-
-    with localconverter(ro.default_converter + pandas2ri.converter):
-        ro.globalenv['m2_data'] = ro.conversion.py2rpy(m2_df)
-
-    print("")
-    print("--- Model 2 ({}): pct_above ~ tissue + region + (1 | patient) ---".format(condition))
-    # y_ijk = beta_0 + beta_tissueWM*1[tissue=WM] + beta_regionInterior*1[region=Interior] + u_i + eps_ijk
-    # $$y_{ijk} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ijk}=\text{WM}] + \beta_{\text{regionInterior}}\,\mathbb{1}[\text{region}_{ijk}=\text{Interior}] + u_i + \varepsilon_{ijk}$$
-    ro.r('''
-        m2_data$patient <- factor(m2_data$patient)
-        m2_data$tissue  <- factor(m2_data$tissue, levels = c("GM", "WM"))
-        m2_data$region  <- factor(m2_data$region, levels = c("Boundary", "Interior"))
-        model2 <- lmerTest::lmer(pct_above ~ tissue + region + (1 | patient), data = m2_data)
-        print(summary(model2))
-        coef_df2 <- get_coef_df(model2)
-        varcorr_df2 <- get_varcorr_df(model2)
-    ''')
-    with localconverter(ro.default_converter + pandas2ri.converter):
-        coef_df2 = ro.conversion.rpy2py(ro.r('coef_df2'))
-        varcorr_df2 = ro.conversion.rpy2py(ro.r('varcorr_df2'))
-
-    model2_qq_path = os.path.join(OUT_DIR, 'lmm_model2_residual_qq_preop_{}.pdf'.format(condition.lower()))
-    ro.globalenv['model2_qq_path'] = model2_qq_path
-    ro.r('''
-        pdf(model2_qq_path, width = 5, height = 5)
-        qqnorm(resid(model2), main = "Model 2 ({}) residual Q-Q"); qqline(resid(model2), col = "red")
-        dev.off()
-        cat("Model 2 ({}) Shapiro-Wilk: "); print(shapiro.test(resid(model2)))
-    '''.format(condition, condition))
-    print("  Plot saved: {}".format(model2_qq_path))
-
-    model2_sections.append("""\
-## Model 2 ({condition}): GM vs WM, boundary vs interior
-
-$$y_{{ijk}} = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_{{ijk}}=\\text{{WM}}] + \\beta_{{\\text{{regionInterior}}}}\\,\\mathbb{{1}}[\\text{{region}}_{{ijk}}=\\text{{Interior}}] + u_i + \\varepsilon_{{ijk}}$$
-
-- $y_{{ijk}}$: `pct_above` for patient $i$, tissue $j$, region $k$, {condition} only
-- $\\beta_0$: intercept - expected `pct_above` for GM x Boundary (the reference levels)
-- $\\beta_{{\\text{{tissueWM}}}}$: fixed effect of WM vs GM, controlling for region
-- $\\beta_{{\\text{{regionInterior}}}}$: fixed effect of Interior vs Boundary, controlling for tissue
-- $u_i \\sim \\mathcal{{N}}(0,\\tau^2)$: random intercept per patient
-- $\\varepsilon_{{ijk}} \\sim \\mathcal{{N}}(0,\\sigma^2)$: residual error
-
-`lmer(pct_above ~ tissue + region + (1 | patient))`, {condition} data only
-
-$$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0 \\ \\text{{and}} \\ \\beta_{{\\text{{regionInterior}}}} = 0$$
-
-No difference in % of cord volume above MPS $=0.10$ between grey and white \
-matter, or between boundary and interior tissue, within {condition}. Both \
-factors are 2-level, so an F-test here would just be t^2 - redundant with \
-the t-tests below.
-
-{coef_table}
-
-{random_effects}
-""".format(condition=condition, coef_table=r_table_to_markdown_from_df(coef_df2),
-           random_effects=format_random_effects_md(varcorr_df2)))
-
-model2_section = "\n".join(model2_sections)
+# Model 2 DISABLED: Shapiro-Wilk on residuals failed normality for BOTH
+# conditions (Flexion p=0.0017, Extension p=4.8e-06) - the Satterthwaite
+# t-test's normality assumption doesn't hold here, so this model's p-values
+# aren't trustworthy. Commented out rather than deleted in case a transform
+# or a robust alternative is worth revisiting later.
+# model2_sections = []
+# for condition in ('Flexion', 'Extension'):
+#     m2_df = (preop_summary[(preop_summary['threshold'] == 't0p10')
+#                            & (preop_summary['loading_condition'] == condition)]
+#              .rename(columns={'participant': 'patient'})
+#              [['patient', 'tissue', 'region', 'pct_above']]
+#              .dropna(subset=['pct_above']))
+#
+#     print("")
+#     print("--- Model 2 data, {} (patient x tissue x region, N={}) ---".format(
+#         condition, m2_df['patient'].nunique()))
+#     print(m2_df.to_string(index=False))
+#
+#     with localconverter(ro.default_converter + pandas2ri.converter):
+#         ro.globalenv['m2_data'] = ro.conversion.py2rpy(m2_df)
+#
+#     print("")
+#     print("--- Model 2 ({}): pct_above ~ tissue + region + (1 | patient) ---".format(condition))
+#     # y_ijk = beta_0 + beta_tissueWM*1[tissue=WM] + beta_regionInterior*1[region=Interior] + u_i + eps_ijk
+#     # $$y_{ijk} = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_{ijk}=\text{WM}] + \beta_{\text{regionInterior}}\,\mathbb{1}[\text{region}_{ijk}=\text{Interior}] + u_i + \varepsilon_{ijk}$$
+#     ro.r('''
+#         m2_data$patient <- factor(m2_data$patient)
+#         m2_data$tissue  <- factor(m2_data$tissue, levels = c("GM", "WM"))
+#         m2_data$region  <- factor(m2_data$region, levels = c("Boundary", "Interior"))
+#         model2 <- lmerTest::lmer(pct_above ~ tissue + region + (1 | patient), data = m2_data)
+#         print(summary(model2))
+#         coef_df2 <- get_coef_df(model2)
+#         varcorr_df2 <- get_varcorr_df(model2)
+#     ''')
+#     with localconverter(ro.default_converter + pandas2ri.converter):
+#         coef_df2 = ro.conversion.rpy2py(ro.r('coef_df2'))
+#         varcorr_df2 = ro.conversion.rpy2py(ro.r('varcorr_df2'))
+#
+#     model2_qq_path = os.path.join(OUT_DIR, 'lmm_model2_residual_qq_preop_{}.pdf'.format(condition.lower()))
+#     ro.globalenv['model2_qq_path'] = model2_qq_path
+#     ro.r('''
+#         pdf(model2_qq_path, width = 5, height = 5)
+#         qqnorm(resid(model2), main = "Model 2 ({}) residual Q-Q"); qqline(resid(model2), col = "red")
+#         dev.off()
+#         sw2 <- shapiro.test(resid(model2))
+#         cat("Model 2 ({}) Shapiro-Wilk: "); print(sw2)
+#     '''.format(condition, condition))
+#     sw2_stat, sw2_p = float(ro.r('sw2$statistic')[0]), float(ro.r('sw2$p.value')[0])
+#     print("  Plot saved: {}".format(model2_qq_path))
+#
+#     model2_sections.append("""\
+# ## Model 2 ({condition}): GM vs WM, boundary vs interior
+#
+# $$y_{{ijk}} = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_{{ijk}}=\\text{{WM}}] + \\beta_{{\\text{{regionInterior}}}}\\,\\mathbb{{1}}[\\text{{region}}_{{ijk}}=\\text{{Interior}}] + u_i + \\varepsilon_{{ijk}}$$
+#
+# - $y_{{ijk}}$: `pct_above` for patient $i$, tissue $j$, region $k$, {condition} only
+# - $\\beta_0$: intercept - expected `pct_above` for GM x Boundary (the reference levels)
+# - $\\beta_{{\\text{{tissueWM}}}}$: fixed effect of WM vs GM, controlling for region
+# - $\\beta_{{\\text{{regionInterior}}}}$: fixed effect of Interior vs Boundary, controlling for tissue
+# - $u_i \\sim \\mathcal{{N}}(0,\\tau^2)$: random intercept per patient
+# - $\\varepsilon_{{ijk}} \\sim \\mathcal{{N}}(0,\\sigma^2)$: residual error
+#
+# `lmer(pct_above ~ tissue + region + (1 | patient))`, {condition} data only
+#
+# $$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0 \\ \\text{{and}} \\ \\beta_{{\\text{{regionInterior}}}} = 0$$
+#
+# No difference in % of cord volume above MPS $=0.10$ between grey and white \
+# matter, or between boundary and interior tissue, within {condition}. Both \
+# factors are 2-level, so an F-test here would just be t^2 - redundant with \
+# the t-tests below.
+#
+# {coef_table}
+#
+# {random_effects}
+#
+# **Shapiro-Wilk (residuals)**: W = {sw_stat:.4g}, p = {sw_p:.4g}{sw_flag}
+# """.format(condition=condition, coef_table=r_table_to_markdown_from_df(coef_df2),
+#            random_effects=format_random_effects_md(varcorr_df2),
+#            sw_stat=sw2_stat, sw_p=sw2_p,
+#            sw_flag=' (residuals deviate from normality)' if sw2_p < 0.05 else ''))
+#
+# model2_section = "\n".join(model2_sections)
+model2_section = ""
 
 summary_md_preop = (
     "# GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)\n\n"
@@ -735,10 +750,253 @@ with open(summary_md_postop_path, 'w', encoding='utf-8') as f:
 print("")
 print("Summary saved: {}".format(summary_md_postop_path))
 
-# TODO (Part 2, discussed not yet built): PreOp-NoPreload vs PostOp,
-# GM/WM differentiated - diff each patient's pct_above (PostOp - PreOp) per
-# tissue, then test diff ~ tissue + (1 | patient), falling back to a paired
-# t-test per tissue if singular (same pattern as the whole-cord model below).
+# ============================================================
+# Part 2: PreOp-NoPreload vs PostOp, tested separately for GM and for WM -
+# does EITHER tissue's strain burden change with surgery? (Not "does surgery
+# affect them differently" - that's a different question.) Same fallback
+# logic as the whole-cord state model above: tries
+# pct_above ~ state + (1 | patient) restricted to one tissue; falls back to
+# a paired t-test if the random intercept is singular. Flexion/Extension
+# kept fully separate, never pooled.
+# ============================================================
+
+def _fit_one_condition_tissue_state_model(preop_df, postop_df, tissue, condition, threshold):
+    """Returns (df, pre_mean, post_mean, p_value, model_kind, coef_df,
+    varcorr_df_or_None). model_kind is 'lmm' or 'ttest' - whichever one
+    actually ran, decided by isSingular()."""
+    def pct_by_patient(elements_df, state_label):
+        rows = []
+        cond_df = elements_df[(elements_df['loading_condition'] == condition) &
+                               (elements_df['tissue_type'] == tissue)]
+        for participant, grp in cond_df.groupby('participant'):
+            rows.append({'patient': participant, 'state': state_label,
+                         'pct_above': pct_above_for_subset(grp, {'t': threshold})['t']})
+        return pd.DataFrame(rows).dropna(subset=['pct_above'])
+
+    pre = pct_by_patient(preop_df, 'PreOp (no preload)')
+    post = pct_by_patient(postop_df, 'PostOp')
+    long_df = pd.concat([pre, post], ignore_index=True)
+
+    wide = long_df.pivot(index='patient', columns='state', values='pct_above')
+    common = wide.dropna().index
+    long_df = long_df[long_df['patient'].isin(common)]
+
+    print("--- Tissue-state data, {} {} (patient x state, N={}) ---".format(tissue, condition, len(common)))
+    print(long_df.to_string(index=False))
+
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['ts_data'] = ro.conversion.py2rpy(long_df)
+
+    print("")
+    print("--- Tissue-state model ({} {}): pct_above ~ state + (1 | patient) ---".format(tissue, condition))
+    ro.r('''
+        ts_data$patient <- factor(ts_data$patient)
+        ts_data$state   <- factor(ts_data$state, levels = c("PreOp (no preload)", "PostOp"))
+        model_ts <- lmerTest::lmer(pct_above ~ state + (1 | patient), data = ts_data)
+        print(summary(model_ts))
+        singular_ts <- isSingular(model_ts)
+    ''')
+    singular = bool(ro.r('singular_ts')[0])
+
+    if not singular:
+        print("  ==> Model used: LMM (random intercept not singular)")
+        ro.r('''
+            fe_ts <- fixef(model_ts)
+            pre_mean_ts <- as.numeric(fe_ts['(Intercept)'])
+            post_mean_ts <- as.numeric(fe_ts['(Intercept)'] + fe_ts['statePostOp'])
+            p_ts <- summary(model_ts)$coefficients['statePostOp', 'Pr(>|t|)']
+            coef_ts <- get_coef_df(model_ts)
+            varcorr_ts <- get_varcorr_df(model_ts)
+        ''')
+        pre_mean, post_mean = ro.r('pre_mean_ts')[0], ro.r('post_mean_ts')[0]
+        p_val = ro.r('p_ts')[0]
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            coef_df = ro.conversion.rpy2py(ro.r('coef_ts'))
+            varcorr_df = ro.conversion.rpy2py(ro.r('varcorr_ts'))
+        return long_df, pre_mean, post_mean, p_val, 'lmm', coef_df, varcorr_df
+
+    print("  ==> Model used: paired t-test (LMM random intercept was singular - falling back)")
+    pre_vals, post_vals = wide.loc[common, 'PreOp (no preload)'].values, wide.loc[common, 'PostOp'].values
+    pre_mean, post_mean = float(pre_vals.mean()), float(post_vals.mean())
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['pre_vals_ts'] = ro.FloatVector(pre_vals)
+        ro.globalenv['post_vals_ts'] = ro.FloatVector(post_vals)
+    ro.r('''
+        tt_ts <- t.test(post_vals_ts, pre_vals_ts, paired = TRUE)
+        print(tt_ts)
+        ttest_ts_df <- data.frame(
+            Term = "PostOp - PreOp (no preload)", Estimate = as.numeric(tt_ts$estimate),
+            CI_low = tt_ts$conf.int[1], CI_high = tt_ts$conf.int[2],
+            df = tt_ts$parameter, t = tt_ts$statistic, `Pr(>|t|)` = tt_ts$p.value,
+            check.names = FALSE
+        )
+    ''')
+    p_val = float(ro.r('tt_ts$p.value')[0])
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        coef_df = ro.conversion.rpy2py(ro.r('ttest_ts_df'))
+    return long_df, pre_mean, post_mean, p_val, 'ttest', coef_df, None
+
+
+def run_prepost_tissue_state(preop_df, postop_df, tissue, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
+    """Fits PreOp-NoPreload vs PostOp for ONE tissue (GM or WM), separately
+    for Flexion and Extension (LMM, falling back to a paired t-test per
+    condition if singular - same pattern as the whole-cord model). Saves a
+    2-panel boxplot and per-condition QQ plots, returns the Markdown
+    section for this tissue."""
+    results = {}
+    for condition in ('Flexion', 'Extension'):
+        df, pre_mean, post_mean, p_val, model_kind, coef_df, varcorr_df = \
+            _fit_one_condition_tissue_state_model(preop_df, postop_df, tissue, condition, threshold)
+        results[condition] = {'df': df, 'pre_mean': pre_mean, 'post_mean': post_mean, 'p': p_val,
+                               'model_kind': model_kind, 'coef_df': coef_df, 'varcorr_df': varcorr_df}
+
+        qq_path = os.path.join(OUT_DIR, 'prepost_tissue_state_qq_{}_{}_{}.pdf'.format(
+            tag, tissue.lower(), condition.lower()))
+        ro.globalenv['ts_qq_path'] = qq_path
+        if model_kind == 'lmm':
+            ro.r('''
+                pdf(ts_qq_path, width = 5, height = 5)
+                qqnorm(resid(model_ts), main = "{} ({}) residual Q-Q"); qqline(resid(model_ts), col = "red")
+                dev.off()
+                sw_ts <- shapiro.test(resid(model_ts))
+                cat("{} ({}) Shapiro-Wilk: "); print(sw_ts)
+            '''.format(tissue, condition, tissue, condition))
+            sw_label = 'residuals'
+        else:
+            ro.r('''
+                ts_diffs <- post_vals_ts - pre_vals_ts
+                pdf(ts_qq_path, width = 5, height = 5)
+                qqnorm(ts_diffs, main = "{} ({}) paired-difference Q-Q"); qqline(ts_diffs, col = "red")
+                dev.off()
+                sw_ts <- shapiro.test(ts_diffs)
+                cat("{} ({}) Shapiro-Wilk (paired differences): "); print(sw_ts)
+            '''.format(tissue, condition, tissue, condition))
+            sw_label = 'paired differences'
+        results[condition]['shapiro'] = (float(ro.r('sw_ts$statistic')[0]), float(ro.r('sw_ts$p.value')[0]), sw_label)
+        print("  Plot saved: {}".format(qq_path))
+
+    if ymax is None:
+        ymax = max(max(r['df']['pct_above'].max(), r['pre_mean'], r['post_mean'])
+                   for r in results.values()) * 1.2
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 5.5), sharey=True)
+    for ax, condition in zip(axes, ('Flexion', 'Extension')):
+        r = results[condition]
+        wide = r['df'].pivot(index='patient', columns='state', values='pct_above')
+        for _, row in wide.iterrows():
+            ax.plot([0, 1], [row['PreOp (no preload)'], row['PostOp']],
+                    color='grey', linewidth=0.6, alpha=0.5, zorder=2.5)
+
+        pre_vals = r['df'][r['df']['state'] == 'PreOp (no preload)']['pct_above']
+        post_vals = r['df'][r['df']['state'] == 'PostOp']['pct_above']
+        box = ax.boxplot([pre_vals.values, post_vals.values], positions=[0, 1], widths=0.35,
+                          showfliers=False, patch_artist=True, zorder=2)
+        for patch in box['boxes']:
+            patch.set_facecolor(to_rgba(TEAL, 0.4))
+            patch.set_edgecolor('black')
+            patch.set_linewidth(0.5)
+        for part in ('whiskers', 'caps', 'medians'):
+            for line in box[part]:
+                line.set_color('black')
+                line.set_linewidth(0.5)
+        marker = CONDITION_MARKERS[condition.lower()]
+        ax.scatter([0] * len(pre_vals), pre_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+        ax.scatter([1] * len(post_vals), post_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+        ax.scatter([0, 1], [r['pre_mean'], r['post_mean']], marker='d', s=80, facecolor='red',
+                   edgecolor='black', linewidth=1.5, zorder=5)
+
+        p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
+        bracket_y, tick = (58 / 70) * ymax, (1.5 / 70) * ymax
+        ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+                color='black', linewidth=1.2, zorder=6)
+        ax.text(0.5, bracket_y + (1 / 70) * ymax, p_label, ha='center', va='bottom', fontsize=10)
+
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['PreOp\n(no preload)', 'PostOp'])
+        model_label = 'LMM' if r['model_kind'] == 'lmm' else 'paired t-test'
+        ax.set_xlabel('{}\n({})'.format(condition, model_label))
+        ax.set_ylim(0, ymax)
+
+    axes[0].set_ylabel('% of {} volume above threshold ({:.2f})'.format(tissue, threshold))
+    mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
+                           label='Mean / estimate')]
+    axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
+    fig.suptitle('{}: PreOp (no preload) vs PostOp'.format(tissue))
+    fig.tight_layout()
+    box_path = os.path.join(OUT_DIR, 'prepost_tissue_state_boxplot_{}_{}.pdf'.format(tag, tissue.lower()))
+    fig.savefig(box_path, bbox_inches='tight')
+    plt.close(fig)
+    print("  Plot saved: {}".format(box_path))
+
+    sections = []
+    for condition in ('Flexion', 'Extension'):
+        r = results[condition]
+        sw_stat, sw_p, sw_label = r['shapiro']
+        sw_flag = ' (deviates from normality)' if sw_p < 0.05 else ''
+        sw_line = "\n\n**Shapiro-Wilk ({})**: W = {:.4g}, p = {:.4g}{}".format(sw_label, sw_stat, sw_p, sw_flag)
+
+        if r['model_kind'] == 'lmm':
+            model_note = "**Model used: linear mixed-effects model** (random intercept not singular)."
+            hypothesis = (
+                "$$y_i = \\beta_0 + \\beta_{\\text{statePostOp}}\\,\\mathbb{1}[\\text{state}_i=\\text{PostOp}] "
+                "+ u_i + \\varepsilon_i$$\n\n$$H_0:\\ \\beta_{\\text{statePostOp}} = 0$$"
+            )
+            extra = "\n\n{}{}".format(format_random_effects_md(r['varcorr_df']), sw_line)
+        else:
+            model_note = ("**Model used: paired t-test** (LMM random-intercept variance was singular - "
+                           "same situation as the whole-cord comparison - so it adds nothing over a plain "
+                           "paired comparison).")
+            hypothesis = (
+                "$$H_0:\\ \\mu_{\\Delta} = 0, \\quad \\Delta_i = \\text{pct\\_above}_{i,\\text{PostOp}} "
+                "- \\text{pct\\_above}_{i,\\text{PreOp}}$$"
+            )
+            extra = sw_line
+
+        sections.append("""\
+## {tissue} ({condition}): PreOp (no preload) vs PostOp
+
+{model_note}
+
+{hypothesis}
+
+No difference in % of {tissue} volume above MPS $={threshold:.2f}$ between \
+PreOp (no preload) and PostOp, within {condition} (not pooled with {other}).
+
+{coef_table}{extra}
+""".format(tissue=tissue, condition=condition, other='Extension' if condition == 'Flexion' else 'Flexion',
+           model_note=model_note, hypothesis=hypothesis, threshold=threshold,
+           coef_table=r_table_to_markdown_from_df(r['coef_df']), extra=extra))
+
+    return "\n".join(sections)
+
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, GM only, threshold={:.2f} ===".format(NOPRELOAD_THRESHOLD))
+tissue_state_section_gm = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'GM', 'prepost')
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, WM only, threshold={:.2f} ===".format(NOPRELOAD_THRESHOLD))
+tissue_state_section_wm = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'WM', 'prepost')
+
+TISSUE_STATE_PREAMBLE = """\
+GM and WM tested completely separately (does EITHER tissue's strain burden \
+change with surgery - not whether surgery affects them differently). Each \
+test tries a mixed model first (patient random intercept); falls back to a \
+paired t-test if that random intercept is singular - which model actually \
+ran is stated explicitly under each condition below. Flexion/Extension kept \
+as separate tests, not pooled.
+"""
+
+summary_md_tissue_state = (
+    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm
+    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm
+)
+summary_md_tissue_state_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state.md')
+with open(summary_md_tissue_state_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_tissue_state)
+print("")
+print("Summary saved: {}".format(summary_md_tissue_state_path))
 
 # ============================================================
 # Whole cord (not tissue-split): PreOp (no preload) vs PostOp, threshold=0.02.
@@ -830,8 +1088,10 @@ def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
             pdf(wc_qq_path, width = 5, height = 5)
             qqnorm(wc_diffs, main = "Whole-cord ({}) paired-difference Q-Q"); qqline(wc_diffs, col = "red")
             dev.off()
-            cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(shapiro.test(wc_diffs))
+            sw_wc <- shapiro.test(wc_diffs)
+            cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(sw_wc)
         '''.format(condition, condition))
+        results[condition]['shapiro'] = (float(ro.r('sw_wc$statistic')[0]), float(ro.r('sw_wc$p.value')[0]))
         print("  Plot saved: {}".format(qq_path))
 
     if ymax is None:
@@ -863,6 +1123,8 @@ def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
         ax.scatter([1] * len(post_vals), post_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
         ax.scatter([0, 1], [r['pre_mean'], r['post_mean']], marker='d', s=80, facecolor='red',
                    edgecolor='black', linewidth=1.5, zorder=5)
+        for patient_id, row in wide.iterrows():
+            ax.text(1.06, row['PostOp'], patient_id, fontsize=6, va='center', ha='left', color=NAVY, zorder=4)
 
         p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
         bracket_y, tick = (58 / 70) * ymax, (1.5 / 70) * ymax
@@ -872,8 +1134,9 @@ def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
 
         ax.set_xticks([0, 1])
         ax.set_xticklabels(['PreOp\n(no preload)', 'PostOp'])
-        ax.set_xlabel(condition)
+        ax.set_xlabel('{}\nn={}'.format(condition, r['df']['patient'].nunique()))
         ax.set_ylim(0, ymax)
+        ax.set_xlim(-0.5, 1.3)
 
     axes[0].set_ylabel('% of whole cord volume above threshold ({:.2f})'.format(threshold))
     mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
@@ -900,7 +1163,11 @@ PostOp-minus-PreOp difference ({condition} only) - see the note above on why \
 this isn't a mixed model.
 
 {coef_table}
-""".format(condition=condition, threshold=threshold, coef_table=r_table_to_markdown_from_df(r['ttest_df'])))
+
+**Shapiro-Wilk (paired differences)**: W = {sw_stat:.4g}, p = {sw_p:.4g}{sw_flag}
+""".format(condition=condition, threshold=threshold, coef_table=r_table_to_markdown_from_df(r['ttest_df']),
+           sw_stat=r['shapiro'][0], sw_p=r['shapiro'][1],
+           sw_flag=' (differences deviate from normality)' if r['shapiro'][1] < 0.05 else ''))
 
     return "\n".join(sections)
 
@@ -928,3 +1195,78 @@ with open(summary_md_wholecord_path, 'w', encoding='utf-8') as f:
     f.write(summary_md_wholecord)
 print("")
 print("Summary saved: {}".format(summary_md_wholecord_path))
+
+# ============================================================
+# Threshold sensitivity: repeat PreOp-NoPreload/PostOp Model 1, the GM/WM
+# tissue-state comparison, and the whole-cord comparison at threshold=0.01
+# instead of 0.02 - Extension is heavily zero-inflated at 0.02 (most
+# patients read ~0%), which collapses several boxes to a sliver on the
+# axis. Separate tag ('_t0p01') and ymax left dynamic (not forced to 70)
+# so nothing here overwrites or is scaled to match the 0.02 outputs.
+# ============================================================
+LOW_THRESHOLD = 0.01
+
+print("")
+print("=== Linear mixed-effects models: PreOp (no preload), threshold={:.2f} ===".format(LOW_THRESHOLD))
+model1_section_nopreload_t01 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p01',
+                                               'PreOp without Preload (threshold=0.01)', threshold=LOW_THRESHOLD)
+summary_md_nopreload_t01 = (
+    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_nopreload_t01
+)
+summary_md_nopreload_t01_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p01.md')
+with open(summary_md_nopreload_t01_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_nopreload_t01)
+print("")
+print("Summary saved: {}".format(summary_md_nopreload_t01_path))
+
+# PostOp Model 1 @ 0.01 DISABLED: Shapiro-Wilk on residuals failed
+# normality for BOTH conditions (Flexion p=0.0067, Extension p=0.00044) -
+# the Satterthwaite t-test's normality assumption doesn't hold here.
+# print("")
+# print("=== Linear mixed-effects models: PostOp, threshold={:.2f} ===".format(LOW_THRESHOLD))
+# model1_section_postop_t01 = run_model1_lmm(postop_elements, 'postop_t0p01',
+#                                             'PostOp (threshold=0.01)', threshold=LOW_THRESHOLD)
+# summary_md_postop_t01 = (
+#     "# GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+#     + PREAMBLE + "\n" + model1_section_postop_t01
+# )
+# summary_md_postop_t01_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p01.md')
+# with open(summary_md_postop_t01_path, 'w', encoding='utf-8') as f:
+#     f.write(summary_md_postop_t01)
+# print("")
+# print("Summary saved: {}".format(summary_md_postop_t01_path))
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, GM only, threshold={:.2f} ===".format(LOW_THRESHOLD))
+tissue_state_section_gm_t01 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'GM',
+                                                        'prepost_t0p01', threshold=LOW_THRESHOLD)
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, WM only, threshold={:.2f} ===".format(LOW_THRESHOLD))
+tissue_state_section_wm_t01 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'WM',
+                                                        'prepost_t0p01', threshold=LOW_THRESHOLD)
+
+summary_md_tissue_state_t01 = (
+    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t01
+    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t01
+)
+summary_md_tissue_state_t01_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p01.md')
+with open(summary_md_tissue_state_t01_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_tissue_state_t01)
+print("")
+print("Summary saved: {}".format(summary_md_tissue_state_t01_path))
+
+print("")
+print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(LOW_THRESHOLD))
+wholecord_section_t01 = run_wholecord_ttest(whole_cord_df, 'prepost_t0p01', threshold=LOW_THRESHOLD)
+summary_md_wholecord_t01 = (
+    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t01
+)
+summary_md_wholecord_t01_path = os.path.join(OUT_DIR, 'ttest_summary_wholecord_prepost_t0p01.md')
+with open(summary_md_wholecord_t01_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_wholecord_t01)
+print("")
+print("Summary saved: {}".format(summary_md_wholecord_t01_path))
