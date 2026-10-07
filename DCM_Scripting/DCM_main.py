@@ -2,8 +2,9 @@
 DCM_main.py - Stage 1: PreOp (no preload) vs PostOp.
 
 Part A: % cord volume above threshold. Part B: blob-size distribution.
-Part C: whole-cord LMM. Output -> preopnopreloadvspostop_results/
-(QQ plots and blob scalar summaries in diagnostic_plots/).
+Part C: whole-cord LMM. Part D: IVD strain (T95) by fusion status. Output
+-> preopnopreloadvspostop_results/ (QQ plots and blob scalar summaries in
+diagnostic_plots/).
 
 Run: python DCM_main.py (first run is slow - builds caches from raw data).
 """
@@ -33,6 +34,19 @@ def pct_volume_above(df, threshold, mps_col='mps', vol_col='volume'):
         return 0.0
     above = df.loc[df[mps_col] >= threshold, vol_col].sum()
     return 100.0 * above / total
+
+
+def volume_weighted_percentile(df, p=0.95, mps_col='mps', vol_col='volume'):
+    """Volume-weighted percentile: the MPS value below which fraction p of
+    total volume lies. Elements weighted by volume, not counted equally -
+    correct when combining regions/patients with different mesh densities.
+
+    Ref: Kleiven, S. (2007). Predictors for traumatic brain injuries
+    evaluated through accident reconstructions. Ann. Adv. Automot. Med., 51, 81-92.
+    """
+    s = df.sort_values(mps_col)
+    cumvol = s[vol_col].cumsum()
+    return s.loc[cumvol >= p * s[vol_col].sum(), mps_col].iloc[0]
 
 
 PLOT_STYLE = {
@@ -1102,3 +1116,367 @@ with open(summary_md_wholecord_t015_path, 'w', encoding='utf-8') as f:
     f.write(summary_md_wholecord_t015)
 print("")
 print("Summary saved: {}".format(summary_md_wholecord_t015_path))
+
+print("")
+print("=" * 70)
+print("PART D: IVD strain (T95), PreOp-NoPreload vs PostOp, by fusion status")
+print("=" * 70)
+
+# ============================================================
+# IVD strain, % IVD volume above T95, PreOp-NoPreload vs PostOp, per
+# patient/condition, fusion patients highlighted. Two threshold versions:
+# global (cohort-pooled) and patientwise (per-patient). Reads '_ivd_mps.csv'
+# via id_map.csv's csv_path (written by Alex_results_extraction_IVD.py).
+# Reuses preop_mjoa_by_participant/postop_mjoa_by_participant/
+# mjoa_delta_by_participant/CONDITION_MARKERS/DELTA_FUSION_PARTICIPANTS
+# already built above.
+# ============================================================
+IVD_STATE_PREOP = 'PreOp-NoPreload'
+IVD_STATE_POSTOP = 'PostOp'
+IVD_STATE_FILLED = {IVD_STATE_PREOP: True, IVD_STATE_POSTOP: False}   # solid vs hollow marker
+
+# T90/T97/T99 commented out, not deleted - everything downstream reads this dict.
+IVD_PERCENTILES = {
+    # 't90': 0.90,
+    't95': 0.95,
+    # 't97': 0.97,
+    # 't99': 0.99,
+}
+IVD_PERCENTILE_COLORS = {
+    # 't90': '#548235',
+    't95': '#2e75b6',
+    # 't97': '#c00000',
+    # 't99': '#7030a0',
+}
+
+# --- Cache: reduced (participant, loading_condition, state) -> [element_label, mps, volume] ---
+ivd_own_cache_path = os.path.join(CACHE_DIR, 'cache_ivd_prepost_peak.csv')
+
+if os.path.isfile(ivd_own_cache_path):
+    print("Loading cached reduced data: {}".format(ivd_own_cache_path))
+    ivd_cache_df = pd.read_csv(ivd_own_cache_path)
+else:
+    print("No cache at {} yet - building it.".format(ivd_own_cache_path))
+    ivd_rows = id_map[
+        (id_map['State'].astype(str).str.strip().isin([IVD_STATE_PREOP, IVD_STATE_POSTOP])) &
+        (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+    ]
+
+    ivd_cache_parts = []
+    ivd_missing = []
+    for _, ivd_row in ivd_rows.iterrows():
+        ivd_participant = int(ivd_row['participant'])
+        ivd_condition = str(ivd_row['loading_condition']).strip()
+        ivd_state = str(ivd_row['State']).strip()
+        ivd_csv_path = str(ivd_row.get('csv_path', '')).strip()
+        if not ivd_csv_path or ivd_csv_path.lower() == 'nan':
+            ivd_missing.append((ivd_participant, ivd_condition, ivd_state))
+            continue
+        ivd_ivd_csv_path = ivd_csv_path.replace('_mps.csv', '_ivd_mps.csv')
+        if not os.path.isfile(ivd_ivd_csv_path):
+            ivd_missing.append((ivd_participant, ivd_condition, ivd_state))
+            continue
+        ivd_raw = pd.read_csv(ivd_ivd_csv_path)
+        # Catches a file still being written (truncated, not a parse error) -
+        # compare against id_map.csv's 'last_frame_idx' from the Cord extraction.
+        ivd_expected_last_frame = ivd_row.get('last_frame_idx', None)
+        if ivd_expected_last_frame not in (None, '') and not pd.isna(ivd_expected_last_frame):
+            if ivd_raw['frame_index'].max() < int(ivd_expected_last_frame):
+                print("  P{} ({}, {}): '_ivd_mps.csv' exists but looks incomplete "
+                      "(max frame_index {} < expected {}) - still extracting, skipping for now.".format(
+                          ivd_participant, ivd_condition, ivd_state,
+                          ivd_raw['frame_index'].max(), int(ivd_expected_last_frame)))
+                ivd_missing.append((ivd_participant, ivd_condition, ivd_state))
+                continue
+        ivd_reduced = reduce_to_frame_mode(ivd_raw, 'peak')
+        ivd_reduced = ivd_reduced.copy()
+        ivd_reduced.insert(0, 'state', ivd_state)
+        ivd_reduced.insert(0, 'loading_condition', ivd_condition)
+        ivd_reduced.insert(0, 'participant', ivd_participant)
+        ivd_cache_parts.append(ivd_reduced)
+
+    if ivd_missing:
+        print("Skipping {} job(s) missing '_ivd_mps.csv' (IVD extraction not done yet for these):".format(
+            len(ivd_missing)))
+        for ivd_p, ivd_c, ivd_s in ivd_missing:
+            print("  P{} ({}, {})".format(ivd_p, ivd_c, ivd_s))
+
+    if not ivd_cache_parts:
+        raise SystemExit("No IVD data loaded - check that Alex_results_extraction_IVD.py has been run.")
+
+    ivd_cache_df = pd.concat(ivd_cache_parts, ignore_index=True)
+    ivd_cache_df.to_csv(ivd_own_cache_path, index=False)
+    print("Cached reduced data: {}".format(ivd_own_cache_path))
+
+# ============================================================
+# Cohort-pooled thresholds - one shared cutoff per percentile, pooled across all patients.
+# ============================================================
+IVD_COHORT_THRESHOLDS = {name: volume_weighted_percentile(ivd_cache_df, p=p) for name, p in IVD_PERCENTILES.items()}
+print("Cohort-pooled thresholds: " + "  ".join(
+    "{}={:.4f}".format(name.upper(), val) for name, val in IVD_COHORT_THRESHOLDS.items()))
+
+# ============================================================
+# Summary: % IVD volume above each cohort-pooled threshold, per job. Raw peak kept for reference.
+# ============================================================
+ivd_records = []
+ivd_peak_records = []
+for (ivd_participant, ivd_condition, ivd_state), ivd_grp in ivd_cache_df.groupby(
+        ['participant', 'loading_condition', 'state']):
+    ivd_p_label = 'P{}'.format(ivd_participant)
+    for ivd_name, ivd_threshold_val in IVD_COHORT_THRESHOLDS.items():
+        ivd_records.append({
+            'participant': ivd_p_label,
+            'loading_condition': ivd_condition,
+            'state': ivd_state,
+            'percentile': ivd_name,
+            'pct_above': pct_volume_above(ivd_grp, ivd_threshold_val),
+        })
+    ivd_peak_records.append({
+        'participant': ivd_p_label, 'loading_condition': ivd_condition, 'state': ivd_state,
+        'peak_ivd_mps': ivd_grp['mps'].max(),
+    })
+ivd_summary = pd.DataFrame(ivd_records)
+ivd_peak_summary = pd.DataFrame(ivd_peak_records)
+
+# Only patients with both a pre-op and post-op mJOA value (needed for the x-axis ordering).
+ivd_summary = ivd_summary[ivd_summary['participant'].isin(mjoa_delta_by_participant)]
+ivd_peak_summary = ivd_peak_summary[ivd_peak_summary['participant'].isin(mjoa_delta_by_participant)]
+
+ivd_summary_path = os.path.join(OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_sortedbymjoachange.csv')
+ivd_summary.merge(ivd_peak_summary, on=['participant', 'loading_condition', 'state']).to_csv(
+    ivd_summary_path, index=False)
+print(ivd_summary.to_string(index=False))
+
+ivd_participants = sorted(ivd_summary['participant'].unique(),
+                           key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+ivd_x_pos = {p: i for i, p in enumerate(ivd_participants)}
+
+# ============================================================
+# Plot: one figure per percentile (just T95). Marker shape = condition, fill = state.
+# ============================================================
+ivd_state_handles = [
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='PreOp (no preload)'),
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='PostOp'),
+]
+ivd_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                          for cond, marker in CONDITION_MARKERS.items()]
+ivd_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion')]
+ivd_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+ivd_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='State')] + ivd_state_handles +
+    [ivd_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + ivd_condition_handles +
+    [ivd_blank] + ivd_fusion_handle
+)
+
+ivd_plot_paths = []
+for ivd_name, ivd_p in IVD_PERCENTILES.items():
+    ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
+    ivd_col_df = ivd_summary[ivd_summary['percentile'] == ivd_name]
+
+    ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
+
+    for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
+        for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
+            if len(ivd_state_grp) == 2:
+                ivd_xp = ivd_x_pos[ivd_participant_label]
+                ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
+                               color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
+        ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
+        ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
+        ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
+        if ivd_filled:
+            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
+        else:
+            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
+                            marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
+
+    for ivd_fusion_p in DELTA_FUSION_PARTICIPANTS:
+        if ivd_fusion_p in ivd_x_pos:
+            ivd_xp = ivd_x_pos[ivd_fusion_p]
+            ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+
+    ivd_ax.set_xticks(range(len(ivd_participants)))
+    ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in ivd_participants])
+    ivd_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    ivd_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+    ivd_ax.set_ylabel('% IVD volume above threshold')
+    ivd_ax.set_title('IVD strain ({} = {:.4f}, cohort-pooled): PreOp (no preload) vs PostOp, by fusion status'.format(
+        ivd_name.upper(), IVD_COHORT_THRESHOLDS[ivd_name]))
+    ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    ivd_fig.tight_layout()
+
+    ivd_plot_path = os.path.join(OUT_DIR, 'multipatient_ivd_plot_{}_prepost_sortedbymjoachange.pdf'.format(ivd_name))
+    ivd_fig.savefig(ivd_plot_path, bbox_inches='tight')
+    plt.close(ivd_fig)
+    ivd_plot_paths.append(ivd_plot_path)
+
+print()
+print("Summary saved: {}".format(ivd_summary_path))
+for _p in ivd_plot_paths:
+    print("Plot saved: {}".format(_p))
+
+# ============================================================
+# Patient-wise version: each patient's own threshold, pooled from their own
+# PreOp-NoPreload + PostOp data. Separate output files ('_patientwise' suffix).
+# ============================================================
+IVD_PATIENT_THRESHOLDS = {}
+for ivd_participant, ivd_pgrp in ivd_cache_df.groupby('participant'):
+    ivd_p_label = 'P{}'.format(ivd_participant)
+    IVD_PATIENT_THRESHOLDS[ivd_p_label] = {
+        name: volume_weighted_percentile(ivd_pgrp, p=p) for name, p in IVD_PERCENTILES.items()}
+
+ivd_pw_records = []
+ivd_pw_peak_records = []
+for (ivd_participant, ivd_condition, ivd_state), ivd_grp in ivd_cache_df.groupby(
+        ['participant', 'loading_condition', 'state']):
+    ivd_p_label = 'P{}'.format(ivd_participant)
+    for ivd_name, ivd_threshold_val in IVD_PATIENT_THRESHOLDS[ivd_p_label].items():
+        ivd_pw_records.append({
+            'participant': ivd_p_label,
+            'loading_condition': ivd_condition,
+            'state': ivd_state,
+            'percentile': ivd_name,
+            'threshold_value': ivd_threshold_val,
+            'pct_above': pct_volume_above(ivd_grp, ivd_threshold_val),
+        })
+    ivd_pw_peak_records.append({
+        'participant': ivd_p_label, 'loading_condition': ivd_condition, 'state': ivd_state,
+        'peak_ivd_mps': ivd_grp['mps'].max(),
+    })
+ivd_pw_summary = pd.DataFrame(ivd_pw_records)
+ivd_pw_peak_summary = pd.DataFrame(ivd_pw_peak_records)
+
+ivd_pw_summary = ivd_pw_summary[ivd_pw_summary['participant'].isin(mjoa_delta_by_participant)]
+ivd_pw_peak_summary = ivd_pw_peak_summary[ivd_pw_peak_summary['participant'].isin(mjoa_delta_by_participant)]
+
+ivd_pw_summary_path = os.path.join(
+    OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_sortedbymjoachange_patientwise.csv')
+ivd_pw_summary.merge(ivd_pw_peak_summary, on=['participant', 'loading_condition', 'state']).to_csv(
+    ivd_pw_summary_path, index=False)
+print()
+print(ivd_pw_summary.to_string(index=False))
+
+ivd_pw_plot_paths = []
+for ivd_name, ivd_p in IVD_PERCENTILES.items():
+    ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
+    ivd_col_df = ivd_pw_summary[ivd_pw_summary['percentile'] == ivd_name]
+
+    ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
+
+    for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
+        for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
+            if len(ivd_state_grp) == 2:
+                ivd_xp = ivd_x_pos[ivd_participant_label]
+                ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
+                               color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
+        ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
+        ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
+        ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
+        if ivd_filled:
+            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
+        else:
+            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
+                            marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
+
+    for ivd_fusion_p in DELTA_FUSION_PARTICIPANTS:
+        if ivd_fusion_p in ivd_x_pos:
+            ivd_xp = ivd_x_pos[ivd_fusion_p]
+            ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+
+    # Starts at 0 explicitly - matplotlib's autoscale otherwise pads slightly below 0.
+    ivd_ax.set_ylim(bottom=0)
+    ivd_ax.set_xticks(range(len(ivd_participants)))
+    ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in ivd_participants])
+    ivd_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    ivd_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+    ivd_ax.set_ylabel('% IVD volume above threshold')
+    ivd_ax.set_title('IVD strain ({}, patient-specific threshold): PreOp (no preload) vs PostOp, '
+                      'by fusion status'.format(ivd_name.upper()))
+    ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    ivd_fig.tight_layout()
+
+    ivd_pw_plot_path = os.path.join(
+        OUT_DIR, 'multipatient_ivd_plot_{}_prepost_sortedbymjoachange_patientwise.pdf'.format(ivd_name))
+    ivd_fig.savefig(ivd_pw_plot_path, bbox_inches='tight')
+    plt.close(ivd_fig)
+    ivd_pw_plot_paths.append(ivd_pw_plot_path)
+
+# Dual-axis variant (adds each patient's own threshold value on a second
+# y-axis, '_w_thresholds' suffix) - NOT part of the current output set.
+
+print()
+print("Summary saved: {}".format(ivd_pw_summary_path))
+for _p in ivd_pw_plot_paths:
+    print("Plot saved: {}".format(_p))
+
+# ============================================================
+# Fusion-patient PreOp vs PostOp diff, both threshold versions, as one
+# Obsidian-ready markdown table (printed, not saved to a file - matches the
+# source script). Flexion/Extension kept separate - never averaged.
+# ============================================================
+IVD_PRINT_PERCENTILE = 't95'
+
+
+def _ivd_fusion_pivot(df, percentile):
+    fusion_df = df[(df['participant'].isin(DELTA_FUSION_PARTICIPANTS)) & (df['percentile'] == percentile)]
+    piv = fusion_df.pivot_table(index=['participant', 'loading_condition'],
+                                 columns='state', values='pct_above').reset_index()
+    piv['delta'] = piv[IVD_STATE_POSTOP] - piv[IVD_STATE_PREOP]
+    return piv.set_index(['participant', 'loading_condition'])
+
+
+ivd_pw_piv = _ivd_fusion_pivot(ivd_pw_summary, IVD_PRINT_PERCENTILE)
+ivd_glob_piv = _ivd_fusion_pivot(ivd_summary, IVD_PRINT_PERCENTILE)
+ivd_combined = ivd_pw_piv.join(ivd_glob_piv, lsuffix='_pw', rsuffix='_global').reset_index()
+ivd_combined = ivd_combined.sort_values(['participant', 'loading_condition'])
+ivd_combined['threshold_pw'] = ivd_combined['participant'].map(
+    lambda p: IVD_PATIENT_THRESHOLDS[p][IVD_PRINT_PERCENTILE])
+ivd_combined['threshold_global'] = IVD_COHORT_THRESHOLDS[IVD_PRINT_PERCENTILE]
+
+print()
+print("Fusion-patient PreOp vs PostOp diff - {} (Obsidian-ready markdown):".format(IVD_PRINT_PERCENTILE.upper()))
+print()
+print("| Participant | Condition | Threshold PS | PreOp PS (%) | PostOp PS (%) | Delta PS (pp) "
+      "| Threshold Global | PreOp Global (%) | PostOp Global (%) | Delta Global (pp) |")
+print("|---|---|---|---|---|---|---|---|---|---|")
+for _, _r in ivd_combined.iterrows():
+    print("| {} | {} | {:.4f} | {:.2f} | {:.2f} | {:+.2f} | {:.4f} | {:.2f} | {:.2f} | {:+.2f} |".format(
+        _r['participant'], _r['loading_condition'], _r['threshold_pw'],
+        _r[IVD_STATE_PREOP + '_pw'], _r[IVD_STATE_POSTOP + '_pw'], _r['delta_pw'],
+        _r['threshold_global'],
+        _r[IVD_STATE_PREOP + '_global'], _r[IVD_STATE_POSTOP + '_global'], _r['delta_global']))
+
+# Direction tally, not a hypothesis test - n/4 patients with PostOp > PreOp.
+print()
+print("Direction summary - {} (fusion patients only, Obsidian-ready markdown):".format(IVD_PRINT_PERCENTILE.upper()))
+print()
+print("| Condition | Threshold | Increased (PostOp > PreOp) | Median delta (pp) |")
+print("|---|---|---|---|")
+for ivd_direction_condition, ivd_direction_grp in ivd_combined.groupby('loading_condition'):
+    for ivd_delta_col, ivd_delta_label in (('delta_pw', 'Patient-specific'), ('delta_global', 'Global')):
+        ivd_n_increased = int((ivd_direction_grp[ivd_delta_col] > 0).sum())
+        ivd_n_total = len(ivd_direction_grp)
+        ivd_median_delta = ivd_direction_grp[ivd_delta_col].median()
+        print("| {} | {} | {}/{} | {:+.2f} |".format(
+            ivd_direction_condition, ivd_delta_label, ivd_n_increased, ivd_n_total, ivd_median_delta))
+
+# ============================================================
+# Standalone table: just the threshold VALUES (patient-wise per fusion
+# patient, plus the single global value for reference).
+# ============================================================
+print()
+print("Threshold values - {} (Obsidian-ready markdown):".format(IVD_PRINT_PERCENTILE.upper()))
+print()
+print("| Participant | Threshold PS (MPS) | Threshold Global (MPS) |")
+print("|---|---|---|")
+for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+    print("| {} | {:.4f} | {:.4f} |".format(
+        ivd_fusion_p, IVD_PATIENT_THRESHOLDS[ivd_fusion_p][IVD_PRINT_PERCENTILE], IVD_COHORT_THRESHOLDS[IVD_PRINT_PERCENTILE]))
