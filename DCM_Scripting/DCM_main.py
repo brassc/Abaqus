@@ -337,7 +337,7 @@ for delta_state_name, delta_ax in delta_ax_by_state.items():
             xs = [delta_x_pos[p] for p in grp['participant']]
             delta_ax.scatter(xs, grp['pct_above'], color=delta_color, marker=marker, s=55, zorder=3)
     if delta_state_name == DELTA_BOTTOM_STATE:
-        for delta_fusion_p in DELTA_FUSION_PARTICIPANTS:
+        for delta_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
             if delta_fusion_p in delta_x_pos:
                 xp = delta_x_pos[delta_fusion_p]
                 delta_ax.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
@@ -535,7 +535,7 @@ for op_threshold_name in DELTA_THRESHOLDS:
         op_xs = [op_combined_x_pos[p] for p in op_grp['participant']]
         op_combined_ax.scatter(op_xs, op_grp['delta'], color=op_color, marker=op_marker, s=55, zorder=3)
 
-for op_fusion_p in DELTA_FUSION_PARTICIPANTS:
+for op_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
     if op_fusion_p in op_combined_x_pos:
         op_xp = op_combined_x_pos[op_fusion_p]
         op_combined_ax.axvspan(op_xp - 0.5, op_xp + 0.5, color='orange', alpha=0.2, zorder=0)
@@ -976,17 +976,18 @@ def run_wholecord_state(df, tag, threshold, ymax=None):
         results[condition] = {'df': wc_df, 'pre_mean': pre_mean, 'post_mean': post_mean, 'p': p_val,
                                'model_kind': model_kind, 'coef_df': coef_df, 'varcorr_df': varcorr_df}
 
+        # QQ coordinates drawn via matplotlib (not R's own pdf() device) so
+        # output is reproducible under SOURCE_DATE_EPOCH - R's base graphics
+        # device doesn't honor that env var and would re-stamp its own
+        # creation date every run regardless. Same approach as GMvsWM's
+        # save_gmvswm_qq_grid.
         qq_path = os.path.join(DIAG_DIR, 'wholecord_state_qq_{}_{}.pdf'.format(tag, condition.lower()))
-        ro.globalenv['wc_qq_path'] = qq_path
         if model_kind == 'lmm':
-            ro.r('''
-                pdf(wc_qq_path, width = 5, height = 5)
-                qqnorm(resid(model_wc), main = "Whole-cord ({}) residual Q-Q"); qqline(resid(model_wc), col = "red")
-                dev.off()
-                sw_wc <- shapiro.test(resid(model_wc))
-                cat("Whole-cord ({}) Shapiro-Wilk: "); print(sw_wc)
-            '''.format(condition, condition))
+            ro.r('wc_qq <- qqnorm(resid(model_wc), plot.it=FALSE)')
+            q1, q3 = list(ro.r('as.numeric(quantile(resid(model_wc), c(0.25, 0.75)))'))
+            ro.r('sw_wc <- shapiro.test(resid(model_wc))')
             sw_label = 'residuals'
+            qq_title = "Whole-cord ({}) residual Q-Q".format(condition)
         else:
             # Paired t-test's actual assumption: the per-patient differences
             # are ~normal - not "model residuals" (there's no model here).
@@ -994,14 +995,30 @@ def run_wholecord_state(df, tag, threshold, ymax=None):
             diffs = (wide_qq['PostOp'] - wide_qq['PreOp (no preload)']).values
             with localconverter(ro.default_converter + pandas2ri.converter):
                 ro.globalenv['wc_diffs'] = ro.FloatVector(diffs)
-            ro.r('''
-                pdf(wc_qq_path, width = 5, height = 5)
-                qqnorm(wc_diffs, main = "Whole-cord ({}) paired-difference Q-Q"); qqline(wc_diffs, col = "red")
-                dev.off()
-                sw_wc <- shapiro.test(wc_diffs)
-                cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(sw_wc)
-            '''.format(condition, condition))
+            ro.r('wc_qq <- qqnorm(wc_diffs, plot.it=FALSE)')
+            q1, q3 = list(ro.r('as.numeric(quantile(wc_diffs, c(0.25, 0.75)))'))
+            ro.r('sw_wc <- shapiro.test(wc_diffs)')
             sw_label = 'paired differences'
+            qq_title = "Whole-cord ({}) paired-difference Q-Q".format(condition)
+
+        qq_theoretical = list(ro.r('wc_qq$x'))
+        qq_sample = list(ro.r('wc_qq$y'))
+        nq1, nq3 = list(ro.r('qnorm(c(0.25, 0.75))'))
+        qq_slope = (q3 - q1) / (nq3 - nq1)
+        qq_intercept = q1 - qq_slope * nq1
+
+        qq_fig, qq_ax = plt.subplots(figsize=(5, 5))
+        qq_ax.scatter(qq_theoretical, qq_sample, color=NAVY, s=20, alpha=0.8)
+        qq_line_x = [min(qq_theoretical), max(qq_theoretical)]
+        qq_line_y = [qq_slope * x + qq_intercept for x in qq_line_x]
+        qq_ax.plot(qq_line_x, qq_line_y, color='red')
+        qq_ax.set_xlabel('Theoretical Quantiles')
+        qq_ax.set_ylabel('Sample Quantiles')
+        qq_ax.set_title(qq_title)
+        qq_fig.tight_layout()
+        qq_fig.savefig(qq_path, bbox_inches='tight')
+        plt.close(qq_fig)
+
         results[condition]['shapiro'] = (float(ro.r('sw_wc$statistic')[0]), float(ro.r('sw_wc$p.value')[0]), sw_label)
         print("  Plot saved: {}".format(qq_path))
 
@@ -1301,7 +1318,7 @@ for ivd_name, ivd_p in IVD_PERCENTILES.items():
             ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
                             marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
 
-    for ivd_fusion_p in DELTA_FUSION_PARTICIPANTS:
+    for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
         if ivd_fusion_p in ivd_x_pos:
             ivd_xp = ivd_x_pos[ivd_fusion_p]
             ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
@@ -1392,7 +1409,7 @@ for ivd_name, ivd_p in IVD_PERCENTILES.items():
             ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
                             marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
 
-    for ivd_fusion_p in DELTA_FUSION_PARTICIPANTS:
+    for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
         if ivd_fusion_p in ivd_x_pos:
             ivd_xp = ivd_x_pos[ivd_fusion_p]
             ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
