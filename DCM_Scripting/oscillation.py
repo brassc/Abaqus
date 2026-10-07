@@ -81,7 +81,11 @@ ID_MAP_PATH = r'C:\Users\cmb247\repos\Abaqus\DCM_Scripting\id_map.csv'
 # points and direction vector against.
 #
 # >>> SET INP_PATH = None BELOW TO RUN THE FULL id_map.csv BATCH INSTEAD <<<
-INP_PATH = None
+# INP_PATH = None
+INP_PATH = r'D:\Charlotte\ABAQUS\N31-038\Job-103-N31-038-PostOpv2-BC0pt35\Job-103-N31-038-PostOpv2-BC0pt35.inp'
+
+# INP_PATH = r'D:\Charlotte\ABAQUS\N01-014\\Job-018-N01-014-Pre-Opv10-BC0pt35\Job-018-N01-014-Pre-Opv10-BC0pt35_0pt30_Site1_Site2.inp'
+
 #r'D:\Charlotte\ABAQUS\N01-011\Pre-Op\Job-020-N01-011-PreOp-BC0pt35wEVOL\Job-020-N01-011-PreOp-BC0pt35wEVOL_0pt30_Site1_Site2_Site3_Site4.inp'
 
 
