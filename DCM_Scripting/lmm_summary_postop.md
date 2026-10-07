@@ -20,19 +20,19 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 4.232 | 2.651 | 13.12 | 1.597 | 0.1342 |
-| tissueWM | 5.647 | 1.578 | 11 | 3.579 | 0.004324 |
+| (Intercept) | 4.118 | 2.68 | 13.1 | 1.537 | 0.1482 |
+| tissueWM | 5.612 | 1.589 | 11 | 3.533 | 0.004694 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 69.37 | 8.329 |
-| Residual | 14.94 | 3.865 |
+| patient | 71.04 | 8.429 |
+| Residual | 15.14 | 3.891 |
 
-**ICC = 0.823**
+**ICC = 0.824**
 
-**Shapiro-Wilk (residuals)**: W = 0.928, p = 0.08817
+**Shapiro-Wilk (residuals)**: W = 0.9242, p = 0.07244
 
 ## Model 1 (Extension): GM vs WM
 
@@ -52,16 +52,16 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 2.033 | 1.807 | 12.19 | 1.125 | 0.2822 |
-| tissueWM | 1.544 | 0.8188 | 11 | 1.886 | 0.08592 |
+| (Intercept) | 0.004256 | 0.1691 | 20 | 0.02517 | 0.9802 |
+| tissueWM | 0.5018 | 0.2376 | 10 | 2.112 | 0.06083 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 35.14 | 5.928 |
-| Residual | 4.023 | 2.006 |
+| patient | 0.003905 | 0.06249 |
+| Residual | 0.3105 | 0.5573 |
 
-**ICC = 0.897**
+**ICC = 0.012**
 
-**Shapiro-Wilk (residuals)**: W = 0.795, p = 0.0002439 (residuals deviate from normality)
+**Shapiro-Wilk (residuals)**: W = 0.7311, p = 4.999e-05 (residuals deviate from normality)

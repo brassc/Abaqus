@@ -563,7 +563,7 @@ def run_model1_lmm(elements_df, tag, title_prefix, threshold=LMM_THRESHOLD, ymax
         ax.set_xlabel(condition)
         ax.set_ylim(0, ymax)
 
-    axes[0].set_ylabel('% of tissue volume above threshold ({:.2f})'.format(threshold))
+    axes[0].set_ylabel('% of tissue volume above threshold ({:g})'.format(threshold))
     lme_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
                           label='LME estimate')]
     axes[0].legend(handles=lme_handle, loc='upper left', frameon=False)
@@ -592,7 +592,7 @@ $$y_i = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}
 
 $$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0$$
 
-No difference in % of cord volume above MPS $={threshold:.2f}$ between grey and white \
+No difference in % of cord volume above MPS $={threshold:g}$ between grey and white \
 matter, within {condition} ({pct_lbl}).
 
 {coef_table}
@@ -917,7 +917,7 @@ def run_prepost_tissue_state(preop_df, postop_df, tissue, tag, threshold=NOPRELO
         ax.set_xlabel('{}\n({})'.format(condition, model_label))
         ax.set_ylim(0, ymax)
 
-    axes[0].set_ylabel('% of {} volume above threshold ({:.2f})'.format(tissue, threshold))
+    axes[0].set_ylabel('% of {} volume above threshold ({:g})'.format(tissue, threshold))
     mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
                            label='Mean / estimate')]
     axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
@@ -959,7 +959,7 @@ def run_prepost_tissue_state(preop_df, postop_df, tissue, tag, threshold=NOPRELO
 
 {hypothesis}
 
-No difference in % of {tissue} volume above MPS $={threshold:.2f}$ between \
+No difference in % of {tissue} volume above MPS $={threshold:g}$ between \
 PreOp (no preload) and PostOp, within {condition} (not pooled with {other}).
 
 {coef_table}{extra}
@@ -1009,14 +1009,12 @@ WHOLE_CORD_STATE_LABELS = {'preop-nopreload': 'PreOp (no preload)', 'postop': 'P
 
 
 def _fit_one_condition_state_model(df, condition, threshold):
-    """Paired t-test (PostOp - PreOp) on ONE condition's whole-cord data
-    alone. NOT a mixed model: a prior check (5 independent optimizers +
-    profile-likelihood CI including 0) confirmed the random-intercept
-    variance here is genuinely 0, not a convergence failure - patients
-    don't keep a consistent PreOp/PostOp rank, so (1 | patient) adds
-    nothing over a plain paired comparison. Contrast with the GM/WM models,
-    where the random intercept is essential (ICC 0.87-0.97).
-    Returns (df, pre_mean, post_mean, p_value, ttest_df)."""
+    """pct_above ~ state + (1 | patient) on ONE condition's whole-cord data
+    alone. Tries the LMM first; falls back to a paired t-test if the random
+    intercept is singular (same pattern as the GM/WM tissue-state models) -
+    re-decided every run, not assumed from a past diagnostic.
+    Returns (df, pre_mean, post_mean, p_value, model_kind, coef_df,
+    varcorr_df_or_None)."""
     cond_df = df[df['loading_condition'] == condition]
     rows = []
     for (participant, state_norm), grp in cond_df.groupby(['participant', 'state_norm']):
@@ -1031,16 +1029,44 @@ def _fit_one_condition_state_model(df, condition, threshold):
     print("--- Whole-cord data, {} (patient x state, N={}) ---".format(condition, len(common)))
     print(long_df.to_string(index=False))
 
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['wc_data'] = ro.conversion.py2rpy(long_df)
+
+    print("")
+    print("--- Whole cord ({}): pct_above ~ state + (1 | patient) ---".format(condition))
+    ro.r('''
+        wc_data$patient <- factor(wc_data$patient)
+        wc_data$state   <- factor(wc_data$state, levels = c("PreOp (no preload)", "PostOp"))
+        model_wc <- lmerTest::lmer(pct_above ~ state + (1 | patient), data = wc_data)
+        print(summary(model_wc))
+        singular_wc <- isSingular(model_wc)
+    ''')
+    singular = bool(ro.r('singular_wc')[0])
+
     pre_vals = wide.loc[common, 'PreOp (no preload)'].values
     post_vals = wide.loc[common, 'PostOp'].values
     pre_mean, post_mean = float(pre_vals.mean()), float(post_vals.mean())
 
+    if not singular:
+        print("  ==> Model used: LMM (random intercept not singular)")
+        ro.r('''
+            fe_wc <- fixef(model_wc)
+            pre_mean_wc <- as.numeric(fe_wc['(Intercept)'])
+            post_mean_wc <- as.numeric(fe_wc['(Intercept)'] + fe_wc['statePostOp'])
+            p_wc <- summary(model_wc)$coefficients['statePostOp', 'Pr(>|t|)']
+            coef_wc <- get_coef_df(model_wc)
+            varcorr_wc <- get_varcorr_df(model_wc)
+        ''')
+        p_val = float(ro.r('p_wc')[0])
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            coef_df = ro.conversion.rpy2py(ro.r('coef_wc'))
+            varcorr_df = ro.conversion.rpy2py(ro.r('varcorr_wc'))
+        return long_df, pre_mean, post_mean, p_val, 'lmm', coef_df, varcorr_df
+
+    print("  ==> Model used: paired t-test (LMM random intercept was singular - falling back)")
     with localconverter(ro.default_converter + pandas2ri.converter):
         ro.globalenv['pre_vals'] = ro.FloatVector(pre_vals)
         ro.globalenv['post_vals'] = ro.FloatVector(post_vals)
-
-    print("")
-    print("--- Whole cord ({}): paired t-test (PostOp - PreOp) ---".format(condition))
     ro.r('''
         tt <- t.test(post_vals, pre_vals, paired = TRUE)
         print(tt)
@@ -1053,45 +1079,57 @@ def _fit_one_condition_state_model(df, condition, threshold):
     ''')
     p_val = float(ro.r('tt$p.value')[0])
     with localconverter(ro.default_converter + pandas2ri.converter):
-        ttest_df = ro.conversion.rpy2py(ro.r('ttest_df'))
+        coef_df = ro.conversion.rpy2py(ro.r('ttest_df'))
+    return long_df, pre_mean, post_mean, p_val, 'ttest', coef_df, None
 
-    return long_df, pre_mean, post_mean, p_val, ttest_df
 
-
-def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
-    """Paired t-test, PreOp-NoPreload vs PostOp (whole cord, not tissue-
-    split), run completely separately for Flexion and Extension (see
-    run_model1_lmm's docstring for why conditions aren't pooled). Not a
-    mixed model - see _fit_one_condition_state_model's docstring for why.
-    Saves a 2-panel boxplot (Flexion left, Extension right, shared y-axis)
-    and a QQ plot of the paired differences, returns the Markdown section
-    covering both conditions."""
+def run_wholecord_state(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
+    """PreOp-NoPreload vs PostOp, whole cord (not tissue-split), run
+    completely separately for Flexion and Extension (see run_model1_lmm's
+    docstring for why conditions aren't pooled). Tries the LMM first per
+    condition, falling back to a paired t-test if singular - see
+    _fit_one_condition_state_model's docstring. Saves a 2-panel boxplot
+    (spaghetti lines + patient ID labels + n= per panel, unaffected by
+    which model won) and per-condition QQ plots, returns the Markdown
+    section covering both conditions."""
     df = df.copy()
     df['state_norm'] = df['state'].astype(str).str.strip().str.lower()
     df = df[df['state_norm'].isin(WHOLE_CORD_STATE_LABELS)]
 
     results = {}
     for condition in ('Flexion', 'Extension'):
-        wc_df, pre_mean, post_mean, p_val, ttest_df = _fit_one_condition_state_model(df, condition, threshold)
-        results[condition] = {'df': wc_df, 'pre_mean': pre_mean, 'post_mean': post_mean,
-                               'p': p_val, 'ttest_df': ttest_df}
+        wc_df, pre_mean, post_mean, p_val, model_kind, coef_df, varcorr_df = \
+            _fit_one_condition_state_model(df, condition, threshold)
+        results[condition] = {'df': wc_df, 'pre_mean': pre_mean, 'post_mean': post_mean, 'p': p_val,
+                               'model_kind': model_kind, 'coef_df': coef_df, 'varcorr_df': varcorr_df}
 
-        # Paired t-test's actual assumption: the per-patient differences are
-        # ~normal - not "model residuals" (there's no model to have them).
-        wide = wc_df.pivot(index='patient', columns='state', values='pct_above')
-        diffs = (wide['PostOp'] - wide['PreOp (no preload)']).values
-        with localconverter(ro.default_converter + pandas2ri.converter):
-            ro.globalenv['wc_diffs'] = ro.FloatVector(diffs)
-        qq_path = os.path.join(OUT_DIR, 'wholecord_ttest_diff_qq_{}_{}.pdf'.format(tag, condition.lower()))
+        qq_path = os.path.join(OUT_DIR, 'wholecord_state_qq_{}_{}.pdf'.format(tag, condition.lower()))
         ro.globalenv['wc_qq_path'] = qq_path
-        ro.r('''
-            pdf(wc_qq_path, width = 5, height = 5)
-            qqnorm(wc_diffs, main = "Whole-cord ({}) paired-difference Q-Q"); qqline(wc_diffs, col = "red")
-            dev.off()
-            sw_wc <- shapiro.test(wc_diffs)
-            cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(sw_wc)
-        '''.format(condition, condition))
-        results[condition]['shapiro'] = (float(ro.r('sw_wc$statistic')[0]), float(ro.r('sw_wc$p.value')[0]))
+        if model_kind == 'lmm':
+            ro.r('''
+                pdf(wc_qq_path, width = 5, height = 5)
+                qqnorm(resid(model_wc), main = "Whole-cord ({}) residual Q-Q"); qqline(resid(model_wc), col = "red")
+                dev.off()
+                sw_wc <- shapiro.test(resid(model_wc))
+                cat("Whole-cord ({}) Shapiro-Wilk: "); print(sw_wc)
+            '''.format(condition, condition))
+            sw_label = 'residuals'
+        else:
+            # Paired t-test's actual assumption: the per-patient differences
+            # are ~normal - not "model residuals" (there's no model here).
+            wide_qq = wc_df.pivot(index='patient', columns='state', values='pct_above')
+            diffs = (wide_qq['PostOp'] - wide_qq['PreOp (no preload)']).values
+            with localconverter(ro.default_converter + pandas2ri.converter):
+                ro.globalenv['wc_diffs'] = ro.FloatVector(diffs)
+            ro.r('''
+                pdf(wc_qq_path, width = 5, height = 5)
+                qqnorm(wc_diffs, main = "Whole-cord ({}) paired-difference Q-Q"); qqline(wc_diffs, col = "red")
+                dev.off()
+                sw_wc <- shapiro.test(wc_diffs)
+                cat("Whole-cord ({}) Shapiro-Wilk (paired differences): "); print(sw_wc)
+            '''.format(condition, condition))
+            sw_label = 'paired differences'
+        results[condition]['shapiro'] = (float(ro.r('sw_wc$statistic')[0]), float(ro.r('sw_wc$p.value')[0]), sw_label)
         print("  Plot saved: {}".format(qq_path))
 
     if ymax is None:
@@ -1134,17 +1172,18 @@ def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
 
         ax.set_xticks([0, 1])
         ax.set_xticklabels(['PreOp\n(no preload)', 'PostOp'])
-        ax.set_xlabel('{}\nn={}'.format(condition, r['df']['patient'].nunique()))
+        model_label = 'LMM' if r['model_kind'] == 'lmm' else 'paired t-test'
+        ax.set_xlabel('{}\nn={} ({})'.format(condition, r['df']['patient'].nunique(), model_label))
         ax.set_ylim(0, ymax)
         ax.set_xlim(-0.5, 1.3)
 
-    axes[0].set_ylabel('% of whole cord volume above threshold ({:.2f})'.format(threshold))
+    axes[0].set_ylabel('% of whole cord volume above threshold ({:g})'.format(threshold))
     mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
-                           label='Mean')]
+                           label='Mean / estimate')]
     axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
     fig.suptitle('Whole Cord: PreOp (no preload) vs PostOp')
     fig.tight_layout()
-    box_path = os.path.join(OUT_DIR, 'wholecord_ttest_boxplot_{}.pdf'.format(tag))
+    box_path = os.path.join(OUT_DIR, 'wholecord_state_boxplot_{}.pdf'.format(tag))
     fig.savefig(box_path, bbox_inches='tight')
     plt.close(fig)
     print("  Plot saved: {}".format(box_path))
@@ -1152,22 +1191,40 @@ def run_wholecord_ttest(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
     sections = []
     for condition in ('Flexion', 'Extension'):
         r = results[condition]
+        sw_stat, sw_p, sw_label = r['shapiro']
+        sw_flag = ' (deviates from normality)' if sw_p < 0.05 else ''
+        sw_line = "\n\n**Shapiro-Wilk ({})**: W = {:.4g}, p = {:.4g}{}".format(sw_label, sw_stat, sw_p, sw_flag)
+
+        if r['model_kind'] == 'lmm':
+            model_note = "**Model used: linear mixed-effects model** (random intercept not singular)."
+            hypothesis = (
+                "$$y_i = \\beta_0 + \\beta_{\\text{statePostOp}}\\,\\mathbb{1}[\\text{state}_i=\\text{PostOp}] "
+                "+ u_i + \\varepsilon_i$$\n\n$$H_0:\\ \\beta_{\\text{statePostOp}} = 0$$"
+            )
+            extra = "\n\n{}{}".format(format_random_effects_md(r['varcorr_df']), sw_line)
+        else:
+            model_note = ("**Model used: paired t-test** (LMM random-intercept variance was singular - "
+                           "adds nothing over a plain paired comparison).")
+            hypothesis = (
+                "$$H_0:\\ \\mu_{\\Delta} = 0, \\quad \\Delta_i = \\text{pct\\_above}_{i,\\text{PostOp}} "
+                "- \\text{pct\\_above}_{i,\\text{PreOp}}$$"
+            )
+            extra = sw_line
+
         sections.append("""\
 ## Whole cord ({condition}): PreOp (no preload) vs PostOp
 
-$$H_0:\\ \\mu_{{\\Delta}} = 0, \\quad \\Delta_i = \\text{{pct\\_above}}_{{i,\\text{{PostOp}}}} - \\text{{pct\\_above}}_{{i,\\text{{PreOp}}}}$$
+{model_note}
 
-No difference in % of whole cord volume above MPS $={threshold:.2f}$ between PreOp \
-(no preload) and PostOp, within {condition}. Paired t-test on each patient's \
-PostOp-minus-PreOp difference ({condition} only) - see the note above on why \
-this isn't a mixed model.
+{hypothesis}
 
-{coef_table}
+No difference in % of whole cord volume above MPS $={threshold:g}$ between PreOp \
+(no preload) and PostOp, within {condition} (not pooled with {other}).
 
-**Shapiro-Wilk (paired differences)**: W = {sw_stat:.4g}, p = {sw_p:.4g}{sw_flag}
-""".format(condition=condition, threshold=threshold, coef_table=r_table_to_markdown_from_df(r['ttest_df']),
-           sw_stat=r['shapiro'][0], sw_p=r['shapiro'][1],
-           sw_flag=' (differences deviate from normality)' if r['shapiro'][1] < 0.05 else ''))
+{coef_table}{extra}
+""".format(condition=condition, other='Extension' if condition == 'Flexion' else 'Flexion',
+           model_note=model_note, hypothesis=hypothesis, threshold=threshold,
+           coef_table=r_table_to_markdown_from_df(r['coef_df']), extra=extra))
 
     return "\n".join(sections)
 
@@ -1176,21 +1233,21 @@ print("")
 print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(NOPRELOAD_THRESHOLD))
 WHOLE_CORD_CACHE_PATH = os.path.join(OUT_DIR, 'cache_prepost_sortedbymjoachange_peak.csv')
 whole_cord_df = pd.read_csv(WHOLE_CORD_CACHE_PATH)
-wholecord_section = run_wholecord_ttest(whole_cord_df, 'prepost', ymax=70)
+wholecord_section = run_wholecord_state(whole_cord_df, 'prepost', ymax=70)
 
 WHOLECORD_PREAMBLE = """\
-Paired t-test, not a mixed model: the random-intercept variance here is \
-genuinely 0 (confirmed via 5 optimizers + profile-likelihood CI), since \
-patients don't keep a consistent PreOp/PostOp rank - unlike the GM/WM \
-models, where it's essential (ICC 0.87-0.97). Flexion/Extension kept as \
-separate tests, not pooled.
+Tries a mixed model first (patient random intercept); falls back to a \
+paired t-test if that random intercept is singular - which model actually \
+ran is stated explicitly under each condition below (re-decided every run, \
+not assumed from a past diagnostic). Flexion/Extension kept as separate \
+tests, not pooled.
 """
 
 summary_md_wholecord = (
     "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section
 )
-summary_md_wholecord_path = os.path.join(OUT_DIR, 'ttest_summary_wholecord_prepost.md')
+summary_md_wholecord_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost.md')
 with open(summary_md_wholecord_path, 'w', encoding='utf-8') as f:
     f.write(summary_md_wholecord)
 print("")
@@ -1260,13 +1317,154 @@ print("Summary saved: {}".format(summary_md_tissue_state_t01_path))
 
 print("")
 print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(LOW_THRESHOLD))
-wholecord_section_t01 = run_wholecord_ttest(whole_cord_df, 'prepost_t0p01', threshold=LOW_THRESHOLD)
+wholecord_section_t01 = run_wholecord_state(whole_cord_df, 'prepost_t0p01', threshold=LOW_THRESHOLD)
 summary_md_wholecord_t01 = (
     "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t01
 )
-summary_md_wholecord_t01_path = os.path.join(OUT_DIR, 'ttest_summary_wholecord_prepost_t0p01.md')
+summary_md_wholecord_t01_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p01.md')
 with open(summary_md_wholecord_t01_path, 'w', encoding='utf-8') as f:
     f.write(summary_md_wholecord_t01)
 print("")
 print("Summary saved: {}".format(summary_md_wholecord_t01_path))
+
+# ============================================================
+# Threshold sensitivity: same four analyses at threshold=0.015 (between
+# the 0.02 and 0.01 passes above). PostOp Model 1 is NOT disabled here -
+# that was a 0.01-specific verdict (Shapiro-Wilk failure), re-decided here
+# from this threshold's own diagnostics rather than assumed.
+# ============================================================
+MID_THRESHOLD = 0.015
+
+print("")
+print("=== Linear mixed-effects models: PreOp (no preload), threshold={:.3f} ===".format(MID_THRESHOLD))
+model1_section_nopreload_t015 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p015',
+                                                'PreOp without Preload (threshold=0.015)', threshold=MID_THRESHOLD)
+summary_md_nopreload_t015 = (
+    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_nopreload_t015
+)
+summary_md_nopreload_t015_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p015.md')
+with open(summary_md_nopreload_t015_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_nopreload_t015)
+print("")
+print("Summary saved: {}".format(summary_md_nopreload_t015_path))
+
+print("")
+print("=== Linear mixed-effects models: PostOp, threshold={:.3f} ===".format(MID_THRESHOLD))
+model1_section_postop_t015 = run_model1_lmm(postop_elements, 'postop_t0p015',
+                                             'PostOp (threshold=0.015)', threshold=MID_THRESHOLD)
+summary_md_postop_t015 = (
+    "# GM/WM linear mixed-effects model - PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_postop_t015
+)
+summary_md_postop_t015_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p015.md')
+with open(summary_md_postop_t015_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_postop_t015)
+print("")
+print("Summary saved: {}".format(summary_md_postop_t015_path))
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, GM only, threshold={:.3f} ===".format(MID_THRESHOLD))
+tissue_state_section_gm_t015 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'GM',
+                                                         'prepost_t0p015', threshold=MID_THRESHOLD)
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, WM only, threshold={:.3f} ===".format(MID_THRESHOLD))
+tissue_state_section_wm_t015 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'WM',
+                                                         'prepost_t0p015', threshold=MID_THRESHOLD)
+
+summary_md_tissue_state_t015 = (
+    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t015
+    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t015
+)
+summary_md_tissue_state_t015_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p015.md')
+with open(summary_md_tissue_state_t015_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_tissue_state_t015)
+print("")
+print("Summary saved: {}".format(summary_md_tissue_state_t015_path))
+
+print("")
+print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.3f} ===".format(MID_THRESHOLD))
+wholecord_section_t015 = run_wholecord_state(whole_cord_df, 'prepost_t0p015', threshold=MID_THRESHOLD)
+summary_md_wholecord_t015 = (
+    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t015
+)
+summary_md_wholecord_t015_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p015.md')
+with open(summary_md_wholecord_t015_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_wholecord_t015)
+print("")
+print("Summary saved: {}".format(summary_md_wholecord_t015_path))
+
+# ============================================================
+# Threshold sensitivity: same four analyses at threshold=0.03 - close to
+# T95 (0.0292) of the pooled whole-cord PreOp-NoPreload+PostOp distribution
+# (computed separately, not tuned to this test's own p-value/Shapiro-Wilk
+# outcome - see conversation). PostOp Model 1 not disabled here either,
+# re-decided from this threshold's own diagnostics.
+# ============================================================
+HIGH_THRESHOLD = 0.03
+
+print("")
+print("=== Linear mixed-effects models: PreOp (no preload), threshold={:g} ===".format(HIGH_THRESHOLD))
+model1_section_nopreload_t03 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p03',
+                                               'PreOp without Preload (threshold=0.03)', threshold=HIGH_THRESHOLD)
+summary_md_nopreload_t03 = (
+    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_nopreload_t03
+)
+summary_md_nopreload_t03_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p03.md')
+with open(summary_md_nopreload_t03_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_nopreload_t03)
+print("")
+print("Summary saved: {}".format(summary_md_nopreload_t03_path))
+
+print("")
+print("=== Linear mixed-effects models: PostOp, threshold={:g} ===".format(HIGH_THRESHOLD))
+model1_section_postop_t03 = run_model1_lmm(postop_elements, 'postop_t0p03',
+                                            'PostOp (threshold=0.03)', threshold=HIGH_THRESHOLD)
+summary_md_postop_t03 = (
+    "# GM/WM linear mixed-effects model - PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    + PREAMBLE + "\n" + model1_section_postop_t03
+)
+summary_md_postop_t03_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p03.md')
+with open(summary_md_postop_t03_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_postop_t03)
+print("")
+print("Summary saved: {}".format(summary_md_postop_t03_path))
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, GM only, threshold={:g} ===".format(HIGH_THRESHOLD))
+tissue_state_section_gm_t03 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'GM',
+                                                        'prepost_t0p03', threshold=HIGH_THRESHOLD)
+
+print("")
+print("=== PreOp-NoPreload vs PostOp, WM only, threshold={:g} ===".format(HIGH_THRESHOLD))
+tissue_state_section_wm_t03 = run_prepost_tissue_state(preop_nopreload_elements, postop_elements, 'WM',
+                                                        'prepost_t0p03', threshold=HIGH_THRESHOLD)
+
+summary_md_tissue_state_t03 = (
+    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t03
+    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t03
+)
+summary_md_tissue_state_t03_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p03.md')
+with open(summary_md_tissue_state_t03_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_tissue_state_t03)
+print("")
+print("Summary saved: {}".format(summary_md_tissue_state_t03_path))
+
+print("")
+print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:g} ===".format(HIGH_THRESHOLD))
+wholecord_section_t03 = run_wholecord_state(whole_cord_df, 'prepost_t0p03', threshold=HIGH_THRESHOLD)
+summary_md_wholecord_t03 = (
+    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t03
+)
+summary_md_wholecord_t03_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p03.md')
+with open(summary_md_wholecord_t03_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_wholecord_t03)
+print("")
+print("Summary saved: {}".format(summary_md_wholecord_t03_path))

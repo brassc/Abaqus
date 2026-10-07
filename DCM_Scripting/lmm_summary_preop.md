@@ -16,7 +16,7 @@ $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}]
 
 $$H_0:\ \beta_{\text{tissueWM}} = 0$$
 
-No difference in % of cord volume above MPS $=0.10$ between grey and white matter, within Flexion (not pooled with Extension).
+No difference in % of cord volume above MPS $=0.1$ between grey and white matter, within Flexion (not pooled with Extension).
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
@@ -48,7 +48,7 @@ $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}]
 
 $$H_0:\ \beta_{\text{tissueWM}} = 0$$
 
-No difference in % of cord volume above MPS $=0.10$ between grey and white matter, within Extension (not pooled with Flexion).
+No difference in % of cord volume above MPS $=0.1$ between grey and white matter, within Extension (not pooled with Flexion).
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
