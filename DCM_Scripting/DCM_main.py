@@ -2270,6 +2270,124 @@ for gmvswm_threshold_name, gmvswm_threshold_label in (('t0p10', 'Threshold 0.10'
 gmvswm_qq_grid_path_stage2 = os.path.join(STAGE2_DIAG_DIR, 'lmm_gmvswm_residual_qq_combined.pdf')
 save_gmvswm_qq_grid(gmvswm_qq_entries_stage2, gmvswm_qq_grid_path_stage2)
 
+print("")
+print("=" * 70)
+print("PART I: Effect of simulated compression-site preload (PreOp)")
+print("=" * 70)
+
+# ============================================================
+# Compare PreOp WITH the simulated compression-site preload (State='preop')
+# against PreOp WITHOUT it (State='preop-nopreload'), patient by patient, for
+# participants with both variants - isolates the effect of the preload
+# modeling assumption itself, independent of surgery. Both states are
+# pre-operative, so patients are ordered by pre-op mJOA (not mJOA change,
+# which needs a post-op value that doesn't apply here). No stats - purely
+# descriptive, same as the source script. Reuses s2blob_per_patient (PreOp-
+# with-preload, built in Part G above) and Stage 1's state_per_patient
+# (PreOp-no-preload half) - no new raw-CSV reads.
+# ============================================================
+PRELOAD_STATE_PRELOAD = 'PreOp'
+PRELOAD_STATE_NO_PRELOAD = 'PreOp-NoPreload'
+PRELOAD_STATE_FILLED = {PRELOAD_STATE_PRELOAD: True, PRELOAD_STATE_NO_PRELOAD: False}   # solid vs hollow marker
+
+PRELOAD_PLOT_A_THRESHOLDS = {'t0p10': 0.10, 't0p15': 0.15}
+PRELOAD_PLOT_A_THRESHOLD_COLORS = {'t0p10': '#2e75b6', 't0p15': '#c00000'}
+
+preload_with_preload = s2blob_per_patient   # (participant, loading_condition) -> reduced df, from Part G
+preload_no_preload = {
+    (p, c): df for (p, c, s), df in state_per_patient.items() if s.strip().lower() == 'preop-nopreload'
+}
+
+preload_participants_with = {p for (p, c) in preload_with_preload}
+preload_participants_without = {p for (p, c) in preload_no_preload}
+preload_target_participants = sorted(preload_participants_with & preload_participants_without)
+if not preload_target_participants:
+    raise SystemExit("No participants have both PreOp and PreOp-NoPreload reduced data.")
+print("Participants with both PreOp and PreOp-NoPreload data: {}".format(
+    ', '.join('P{}'.format(p) for p in preload_target_participants)))
+
+preload_participants = sorted(('P{}'.format(p) for p in preload_target_participants),
+                              key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
+preload_x_pos = {p: i for i, p in enumerate(preload_participants)}
+
+# ============================================================
+# Plot A: paired threshold comparison, PreOp (solid) vs PreOp-NoPreload (hollow)
+# ============================================================
+preload_records = []
+for preload_state_name, preload_state_data in ((PRELOAD_STATE_PRELOAD, preload_with_preload),
+                                                (PRELOAD_STATE_NO_PRELOAD, preload_no_preload)):
+    for (preload_p, preload_c), preload_df in sorted(preload_state_data.items()):
+        if preload_p not in preload_target_participants:
+            continue
+        preload_record = {'participant': 'P{}'.format(preload_p), 'loading_condition': preload_c,
+                           'state': preload_state_name}
+        for preload_name, preload_val in PRELOAD_PLOT_A_THRESHOLDS.items():
+            preload_record['pct_above_{}'.format(preload_name)] = pct_volume_above(preload_df, preload_val)
+        preload_records.append(preload_record)
+preload_summary = pd.DataFrame(preload_records)
+
+preload_summary_path = os.path.join(
+    STAGE2_RESULTS_DIR, 'multipatient_mps_summary_preload_effect_sortedbypreopmJOA.csv')
+preload_summary.to_csv(preload_summary_path, index=False)
+print(preload_summary.to_string(index=False))
+
+preload_fig, preload_ax = plt.subplots(figsize=(8, 5.5))
+
+for preload_name in PRELOAD_PLOT_A_THRESHOLDS:
+    preload_col = 'pct_above_{}'.format(preload_name)
+    preload_color = PRELOAD_PLOT_A_THRESHOLD_COLORS[preload_name]
+    # Connect Flexion<->Extension pairs within the SAME state only.
+    for (_, _), preload_grp in preload_summary.groupby(['participant', 'state']):
+        if len(preload_grp) == 2:
+            preload_xp = preload_x_pos[preload_grp['participant'].iloc[0]]
+            preload_ax.vlines(preload_xp, preload_grp[preload_col].min(), preload_grp[preload_col].max(),
+                               color=preload_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for (preload_cond, preload_state), preload_grp in preload_summary.groupby(['loading_condition', 'state']):
+        preload_marker = CONDITION_MARKERS.get(preload_cond.strip().lower(), 'o')
+        preload_filled = PRELOAD_STATE_FILLED.get(preload_state, True)
+        preload_xs = [preload_x_pos[p] for p in preload_grp['participant']]
+        if preload_filled:
+            preload_ax.scatter(preload_xs, preload_grp[preload_col], color=preload_color, marker=preload_marker,
+                                s=55, zorder=3)
+        else:
+            preload_ax.scatter(preload_xs, preload_grp[preload_col], facecolors='none', edgecolors=preload_color,
+                                marker=preload_marker, s=55, linewidths=1.3, zorder=3)
+
+preload_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=PRELOAD_PLOT_A_THRESHOLD_COLORS[name],
+                                     label='{:.2f}'.format(val))
+                              for name, val in PRELOAD_PLOT_A_THRESHOLDS.items()]
+preload_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                              for cond, marker in CONDITION_MARKERS.items()]
+preload_state_handles = [
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='PreOp'),
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='PreOp-NoPreload'),
+]
+preload_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+preload_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + preload_threshold_handles +
+    [preload_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + preload_condition_handles +
+    [preload_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='State')] + preload_state_handles
+)
+preload_ax.legend(handles=preload_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+preload_ax.set_xticks(range(len(preload_participants)))
+preload_ax.set_xticklabels(
+    ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants])
+preload_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+preload_ax.set_ylabel('% cord volume above threshold')
+preload_ax.set_title('Effect of simulated compression-site preload (PreOp)')
+preload_fig.tight_layout()
+
+preload_plot_path = os.path.join(STAGE2_RESULTS_DIR, 'multipatient_mps_plot_preload_effect_sortedbypreopmJOA.pdf')
+preload_fig.savefig(preload_plot_path, bbox_inches='tight')
+plt.close(preload_fig)
+
+print("Summary saved: {}".format(preload_summary_path))
+print("Plot saved: {}".format(preload_plot_path))
+
 # ============================================================
 # ============================================================
 # STAGE 3: Oscillation (PreOp only)
@@ -2283,7 +2401,7 @@ os.makedirs(STAGE3_CACHE_DIR, exist_ok=True)
 
 print("")
 print("=" * 70)
-print("PART I: Oscillation, cumulative vs at-peak vs baseline (PreOp only)")
+print("PART J: Oscillation, cumulative vs at-peak vs baseline (PreOp only)")
 print("=" * 70)
 
 # ============================================================
