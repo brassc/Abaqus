@@ -27,6 +27,8 @@ DCM_Scripting/id_map.csv
 
 # Regenerable cache files (derived from raw extraction data, rebuilt by the scripts)
 DCM_Scripting/cache_*.csv
+DCM_Scripting/**/cache_*.csv
+DCM_Scripting/**/cache/*.csv
 
 # Abaqus specific
 *.rpy
