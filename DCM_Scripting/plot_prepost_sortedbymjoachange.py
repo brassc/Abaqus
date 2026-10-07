@@ -33,11 +33,12 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Must match the FRAME_MODE the cache was generated with (selects the cache file).
 FRAME_MODE = 'peak'
 
-DELTA_THRESHOLDS = {'t0p01': 0.01, 't0p02': 0.02, 't0p03': 0.03}
+DELTA_THRESHOLDS = {'t0p01': 0.01, 't0p015': 0.015, 't0p02': 0.02, 't0p025': 0.025}
 DELTA_THRESHOLD_COLORS = {
     't0p01': '#2a78d6',   # blue
+    't0p015': '#1baf7a',  # aqua
     't0p02': '#eb6834',   # orange
-    't0p03': '#1baf7a',   # aqua
+    't0p025': '#c00000',  # red
 }
 
 CONDITION_MARKERS = {'flexion': 's', 'extension': '^'}
@@ -148,7 +149,7 @@ for delta_state_name, delta_ax in delta_ax_by_state.items():
     delta_ax.set_title(DELTA_STATE_TITLES[delta_state_name])
 
 delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
-                                   label='{:.2f}'.format(val))
+                                   label='{:g}'.format(val))
                             for name, val in DELTA_THRESHOLDS.items()]
 delta_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                             for cond, marker in CONDITION_MARKERS.items()]
@@ -278,7 +279,7 @@ for op_group_name, op_ax in op_ax_by_group.items():
 op_ax_decomp.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
 
 op_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
-                                label='{:.2f}'.format(val))
+                                label='{:g}'.format(val))
                          for name, val in DELTA_THRESHOLDS.items()]
 op_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
                          for cond, marker in CONDITION_MARKERS.items()]
