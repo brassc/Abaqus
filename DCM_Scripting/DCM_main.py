@@ -1480,3 +1480,725 @@ print("|---|---|---|")
 for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
     print("| {} | {:.4f} | {:.4f} |".format(
         ivd_fusion_p, IVD_PATIENT_THRESHOLDS[ivd_fusion_p][IVD_PRINT_PERCENTILE], IVD_COHORT_THRESHOLDS[IVD_PRINT_PERCENTILE]))
+
+print("")
+print("=" * 70)
+print("PART F: GM/WM tissue boundary enrichment, PreOp (no preload)")
+print("=" * 70)
+
+# ============================================================
+# Does high-strain volume sit in GM or WM, and/or at the GM/WM boundary?
+# One number per (tissue, region) combo - % of that subset's own volume
+# above threshold - for GM x Interior, GM x Boundary, WM x Interior,
+# WM x Boundary. Needs '_mps_GM_WM.csv' and '_topology.csv' per job (from
+# Alex_results_extraction_GM_WM.py); missing files are skipped. Shared by
+# Stage 2's PreOp-with-preload run below - defined once here (out_dir/
+# cache_dir passed explicitly per call) rather than duplicated per stage.
+# ============================================================
+PREOP_THRESHOLDS = {'t0p10': 0.10, 't0p15': 0.15}
+
+
+def find_boundary_elements(edges, tissue_type_by_element):
+    adjacency = defaultdict(set)
+    for a, b in edges:
+        adjacency[a].add(b)
+        adjacency[b].add(a)
+
+    boundary = set()
+    for elem, neighbors in adjacency.items():
+        t = tissue_type_by_element.get(elem)
+        if t is None:
+            continue
+        for n in neighbors:
+            nt = tissue_type_by_element.get(n)
+            if nt is not None and nt != t:
+                boundary.add(elem)
+                break
+    return boundary
+
+
+def pct_above_for_subset(sub_df, thresholds):
+    """{threshold: pct_above} - % of sub_df's own volume above each
+    threshold. NaN if sub_df has zero volume."""
+    total = sub_df['volume'].sum()
+    per_threshold = {}
+    for name, val in thresholds.items():
+        if total <= 0:
+            per_threshold[name] = float('nan')
+            continue
+        above = sub_df.loc[sub_df['mps'] >= val, 'volume'].sum()
+        per_threshold[name] = 100.0 * above / total
+    return per_threshold
+
+
+def compute_tissue_region_pct_above(job_df, thresholds):
+    """{(tissue, region): {threshold: pct_above}} for the 4 combinations of
+    tissue (GM/WM) x region (Interior/Boundary) - each normalized against
+    its own subset's volume, so all 4 are directly comparable."""
+    is_boundary = job_df['is_boundary'].astype(bool)
+    result = {}
+    for tissue in ('GM', 'WM'):
+        tissue_mask = job_df['tissue_type'] == tissue
+        result[(tissue, 'Interior')] = pct_above_for_subset(job_df[tissue_mask & ~is_boundary], thresholds)
+        result[(tissue, 'Boundary')] = pct_above_for_subset(job_df[tissue_mask & is_boundary], thresholds)
+    return result
+
+
+def build_job_df(csv_path):
+    """Per-element mps/volume/tissue_type/is_boundary for one job, or None if
+    '_mps_GM_WM.csv' is missing. is_boundary is meaningless unless
+    has_topology is True."""
+    gmwm_path = csv_path.replace('_mps.csv', '_mps_GM_WM.csv')
+    if not os.path.isfile(gmwm_path):
+        return None
+
+    raw = pd.read_csv(gmwm_path)
+    tissue_type_by_element = raw.groupby('element_label')['tissue_type'].first().to_dict()
+    job_df = reduce_to_frame_mode(raw, 'peak')
+    job_df['tissue_type'] = job_df['element_label'].map(tissue_type_by_element)
+
+    topology_path = csv_path.replace('_mps.csv', '_topology.csv')
+    has_topology = os.path.isfile(topology_path)
+    job_df['has_topology'] = has_topology
+    if has_topology:
+        edges = load_adjacency_edges(topology_path)
+        boundary_elements = find_boundary_elements(edges, tissue_type_by_element)
+        job_df['is_boundary'] = job_df['element_label'].isin(boundary_elements)
+    else:
+        job_df['is_boundary'] = False
+
+    return job_df
+
+
+def make_x_order(participants):
+    return sorted(participants, key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
+
+
+TISSUE_COLOR = {'GM': '#2e75b6', 'WM': '#c00000'}
+REGION_FILLED = {'Interior': True, 'Boundary': False}
+
+# Standard grouped-bar "dodge" layout: the 4 columns use GROUP_WIDTH of each
+# participant's 1.0-wide slot, evenly spaced; the rest (1 - GROUP_WIDTH) is a
+# guaranteed gutter to the next participant, sized as 2x the within-group gap
+# so groups read as visually separate regardless of column count.
+GROUP_WIDTH = 0.6
+CATEGORY_ORDER = [('GM', 'Interior'), ('GM', 'Boundary'), ('WM', 'Interior'), ('WM', 'Boundary')]
+_n = len(CATEGORY_ORDER)
+CATEGORY_X_OFFSET = {cat: GROUP_WIDTH * (i / (_n - 1) - 0.5) for i, cat in enumerate(CATEGORY_ORDER)}
+
+
+def plot_tissue_boundary(df, threshold_val, plot_path, title, has_condition):
+    """One plot per threshold, 4 columns per participant: GM (blue) left,
+    WM (red) right; within each, Interior (solid) left of Boundary (hollow).
+    Vline connects each column's Flexion/Extension pair."""
+    plot_df = df.dropna(subset=['pct_above'])
+    if plot_df.empty:
+        print("  Nothing to plot (zero volume for every job).")
+        return
+
+    participants = make_x_order(plot_df['participant'].unique())
+    base_x = {p: i for i, p in enumerate(participants)}
+
+    def xpos(p, tissue, region):
+        return base_x[p] + CATEGORY_X_OFFSET[(tissue, region)]
+
+    # Figure width scales with participant count so the wider spacing above
+    # renders as real physical space, not just a stretched data range.
+    fig, ax = plt.subplots(figsize=(max(9.5, 0.9 * len(participants) + 2), 5.5))
+
+    if has_condition:
+        for (p, tissue, region), grp in plot_df.groupby(['participant', 'tissue', 'region']):
+            if len(grp) == 2:
+                ax.vlines(xpos(p, tissue, region), grp['pct_above'].min(), grp['pct_above'].max(),
+                          color=TISSUE_COLOR[tissue], linewidth=1.0, alpha=0.5, zorder=2)
+
+    for (tissue, region), grp_tr in plot_df.groupby(['tissue', 'region']):
+        color = TISSUE_COLOR[tissue]
+        condition_groups = grp_tr.groupby('loading_condition') if has_condition else [(None, grp_tr)]
+        for condition, grp in condition_groups:
+            marker = CONDITION_MARKERS.get(str(condition).strip().lower(), 'o') if has_condition else 'o'
+            xs = [xpos(p, tissue, region) for p in grp['participant']]
+            if REGION_FILLED[region]:
+                ax.scatter(xs, grp['pct_above'], color=color, marker=marker, s=55, alpha=0.85, zorder=3)
+            else:
+                ax.scatter(xs, grp['pct_above'], facecolors='none', edgecolors=color, marker=marker,
+                           s=55, linewidths=1.4, zorder=3)
+
+    ax.set_xticks([base_x[p] for p in participants])
+    ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in participants])
+    ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+    ax.set_ylabel('% of subset volume above threshold ({:.2f})'.format(threshold_val))
+    ax.set_title(title)
+
+    tissue_handles = [
+        Line2D([0], [0], marker='o', linestyle='', color=TISSUE_COLOR['GM'],
+               markerfacecolor=TISSUE_COLOR['GM'], label='GM'),
+        Line2D([0], [0], marker='o', linestyle='', color=TISSUE_COLOR['WM'],
+               markerfacecolor=TISSUE_COLOR['WM'], label='WM'),
+    ]
+    region_handles = [
+        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='Interior'),
+        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='Boundary'),
+    ]
+    blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+    handles = (
+        [Line2D([0], [0], linestyle='none', marker='None', label='Tissue')] + tissue_handles +
+        [blank, Line2D([0], [0], linestyle='none', marker='None', label='Region')] + region_handles
+    )
+    if has_condition:
+        condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                              for cond, marker in CONDITION_MARKERS.items()]
+        handles += [blank, Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + condition_handles
+    ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    fig.tight_layout()
+    fig.savefig(plot_path, bbox_inches='tight')
+    plt.close(fig)
+    print("  Plot saved: {}".format(plot_path))
+
+
+def load_or_build_combined_df(rows, tag, id_fn, cache_dir):
+    """Pooled per-element data for this dataset, cached to
+    'cache_gm_wm_boundary_<tag>.csv'. Delete the cache to force a rebuild."""
+    id_cols = list(id_fn(rows.iloc[0]).keys()) if not rows.empty else []
+    cache_path = os.path.join(cache_dir, 'cache_gm_wm_boundary_{}.csv'.format(tag))
+
+    if os.path.isfile(cache_path):
+        print("Loading cached per-element data: {}".format(cache_path))
+        return pd.read_csv(cache_path), id_cols
+
+    print("No cache yet - building {} (slow: reads raw CSVs + topology).".format(cache_path))
+    parts, missing = [], []
+    for _, row in rows.iterrows():
+        ids = id_fn(row)
+        csv_path = str(row.get('csv_path', '')).strip()
+        job_df = build_job_df(csv_path) if csv_path and csv_path.lower() != 'nan' else None
+        if job_df is None:
+            missing.append(ids)
+            continue
+        for k, v in ids.items():
+            job_df[k] = v
+        parts.append(job_df)
+
+    if missing:
+        print("Skipping {} job(s) missing '_mps_GM_WM.csv':".format(len(missing)))
+        for ids in missing:
+            print("  {}".format(', '.join(str(v) for v in ids.values())))
+
+    if not parts:
+        return pd.DataFrame(), id_cols
+
+    combined_df = pd.concat(parts, ignore_index=True)
+    combined_df.to_csv(cache_path, index=False)
+    print("Cached per-element data: {}".format(cache_path))
+    return combined_df, id_cols
+
+
+def run_dataset(rows, thresholds, tag, title_prefix, has_condition, id_fn, out_dir, cache_dir):
+    combined_df, id_cols = load_or_build_combined_df(rows, tag, id_fn, cache_dir)
+
+    records, missing_topology = [], []
+    for key, job_df in (combined_df.groupby(id_cols) if not combined_df.empty else []):
+        ids = dict(zip(id_cols, key if isinstance(key, tuple) else (key,)))
+
+        if not bool(job_df['has_topology'].iloc[0]):
+            missing_topology.append(ids)
+            continue
+        for (tissue, region), per in compute_tissue_region_pct_above(job_df, thresholds).items():
+            for name in thresholds:
+                records.append(dict(ids, threshold=name, tissue=tissue, region=region, pct_above=per[name]))
+
+    if missing_topology:
+        print("Skipping {} job(s) missing '_topology.csv':".format(len(missing_topology)))
+        for ids in missing_topology:
+            print("  {}".format(', '.join(str(v) for v in ids.values())))
+
+    summary = pd.DataFrame(records)
+    if not summary.empty:
+        path = os.path.join(out_dir, 'multipatient_gm_wm_tissue_boundary_{}.csv'.format(tag))
+        summary.to_csv(path, index=False)
+        print(summary.to_string(index=False))
+        print("Summary saved: {}".format(path))
+        for name, val in thresholds.items():
+            plot_path = os.path.join(
+                out_dir, 'multipatient_gm_wm_tissue_boundary_{}_{}_sortedbypreopmJOA.pdf'.format(tag, name))
+            plot_tissue_boundary(summary[summary['threshold'] == name], val, plot_path,
+                                  '{}: high-strain volume by tissue and region (threshold {:.2f})'.format(
+                                      title_prefix, val),
+                                  has_condition)
+    else:
+        print("No data available yet.")
+
+    return combined_df, summary
+
+
+print("=== PreOp (no preload) ===")
+preop_nopreload_rows = id_map[
+    (id_map['State'].astype(str).str.strip().str.lower() == 'preop-nopreload') &
+    (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+]
+preop_nopreload_elements, preop_nopreload_summary = run_dataset(
+    preop_nopreload_rows, PREOP_THRESHOLDS, 'preop_nopreload', 'PreOp (no preload)',
+    has_condition=True,
+    id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
+                        'loading_condition': str(row['loading_condition']).strip()},
+    out_dir=RESULTS_DIR, cache_dir=CACHE_DIR)
+
+print("")
+print("=== PostOp ===")
+postop_rows = id_map[
+    (id_map['State'].astype(str).str.strip().str.lower() == 'postop') &
+    (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+]
+postop_elements, postop_summary = run_dataset(
+    postop_rows, PREOP_THRESHOLDS, 'postop', 'PostOp',
+    has_condition=True,
+    id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
+                        'loading_condition': str(row['loading_condition']).strip()},
+    out_dir=RESULTS_DIR, cache_dir=CACHE_DIR)
+
+print("")
+print("=" * 70)
+print("PART F (cont.): GM vs WM LMM, PreOp (no preload) and PostOp, threshold=0.015")
+print("=" * 70)
+
+# ============================================================
+# GMvsWM: pct_above ~ tissue + (1 | patient), GM vs WM, fit completely
+# separately for Flexion and Extension (not pooled with condition as a
+# covariate - the two loading modes differ too much in magnitude). Reuses
+# preop_nopreload_elements (per-element data from Part F's run_dataset
+# call above), pct_above_for_subset, and the rpy2/lme4/get_coef_df/
+# get_varcorr_df/r_table_to_markdown_from_df/format_random_effects_md/
+# NAVY/TEAL machinery already set up in Part C.
+# ============================================================
+PREAMBLE = """\
+Patient is a random intercept; loading condition (Flexion/Extension) is kept \
+as its own main-effect covariate rather than averaged away - they differ \
+hugely in magnitude, so averaging would blend two different mechanical \
+regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), \
+not asymptotic z.
+"""
+
+
+def _fit_one_condition_tissue_model(elements_df, condition, threshold):
+    """Fits pct_above ~ tissue + (1 | patient) on ONE condition's data alone.
+    Returns (df, gm_mean, wm_mean, p_value, coef_df, varcorr_df, sw_stat,
+    sw_p, resid_values) - residuals/Shapiro extracted here, immediately
+    after fitting, since the R model object is overwritten on the next
+    condition's fit."""
+    cond_df = elements_df[elements_df['loading_condition'] == condition]
+    rows = []
+    for (participant, tissue), grp in cond_df.groupby(['participant', 'tissue_type']):
+        rows.append({'patient': participant, 'tissue': tissue,
+                     'pct_above': pct_above_for_subset(grp, {'t': threshold})['t']})
+    df = pd.DataFrame(rows).dropna(subset=['pct_above'])
+
+    print("--- GMvsWM data, {} (patient x tissue, N={}) ---".format(condition, df['patient'].nunique()))
+    print(df.to_string(index=False))
+
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        ro.globalenv['gmvswm_data'] = ro.conversion.py2rpy(df)
+
+    print("")
+    print("--- GMvsWM ({}): pct_above ~ tissue + (1 | patient) ---".format(condition))
+    ro.r('''
+        gmvswm_data$patient <- factor(gmvswm_data$patient)
+        gmvswm_data$tissue  <- factor(gmvswm_data$tissue, levels = c("GM", "WM"))
+        gmvswm_model <- lmerTest::lmer(pct_above ~ tissue + (1 | patient), data = gmvswm_data)
+        print(summary(gmvswm_model))
+    ''')
+    ro.r('''
+        gmvswm_fe <- fixef(gmvswm_model)
+        gm_mean <- as.numeric(gmvswm_fe['(Intercept)'])
+        wm_mean <- as.numeric(gmvswm_fe['(Intercept)'] + gmvswm_fe['tissueWM'])
+        gmvswm_p <- summary(gmvswm_model)$coefficients['tissueWM', 'Pr(>|t|)']
+        coef_df <- get_coef_df(gmvswm_model)
+        varcorr_df <- get_varcorr_df(gmvswm_model)
+    ''')
+    gm_mean, wm_mean = ro.r('gm_mean')[0], ro.r('wm_mean')[0]
+    gmvswm_p = ro.r('gmvswm_p')[0]
+    with localconverter(ro.default_converter + pandas2ri.converter):
+        coef_df = ro.conversion.rpy2py(ro.r('coef_df'))
+        varcorr_df = ro.conversion.rpy2py(ro.r('varcorr_df'))
+
+    ro.r('gmvswm_sw <- shapiro.test(resid(gmvswm_model))')
+    sw_stat = float(ro.r('gmvswm_sw$statistic')[0])
+    sw_p = float(ro.r('gmvswm_sw$p.value')[0])
+
+    # Q-Q coordinates + qqline's reference-line slope/intercept, computed in
+    # R (no scipy dependency in this codebase) for later combined plotting.
+    ro.r('gmvswm_qq <- qqnorm(resid(gmvswm_model), plot.it=FALSE)')
+    qq_theoretical = list(ro.r('gmvswm_qq$x'))
+    qq_sample = list(ro.r('gmvswm_qq$y'))
+    q1, q3 = list(ro.r('as.numeric(quantile(resid(gmvswm_model), c(0.25, 0.75)))'))
+    nq1, nq3 = list(ro.r('qnorm(c(0.25, 0.75))'))
+    qq_slope = (q3 - q1) / (nq3 - nq1)
+    qq_intercept = q1 - qq_slope * nq1
+
+    return (df, gm_mean, wm_mean, gmvswm_p, coef_df, varcorr_df, sw_stat, sw_p,
+            qq_theoretical, qq_sample, qq_slope, qq_intercept)
+
+
+def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, ymax=None):
+    """Fits GM vs WM completely separately for Flexion and Extension. Saves
+    a 2-panel boxplot (Flexion left, Extension right, shared y-axis, with
+    spaghetti lines connecting each patient's GM/WM pair). Residual QQ plots
+    are NOT drawn here - the caller combines them across states into one
+    grid (see save_gmvswm_qq_grid). Returns (markdown_section, results) -
+    results carries 'resid'/'shapiro' per condition for that combined grid."""
+    results = {}
+    for condition in ('Flexion', 'Extension'):
+        (df, gm_mean, wm_mean, p_val, coef_df, varcorr_df, sw_stat, sw_p,
+         qq_theoretical, qq_sample, qq_slope, qq_intercept) = _fit_one_condition_tissue_model(
+            elements_df, condition, threshold)
+        results[condition] = {'df': df, 'gm_mean': gm_mean, 'wm_mean': wm_mean, 'p': p_val,
+                               'coef_df': coef_df, 'varcorr_df': varcorr_df,
+                               'shapiro': (sw_stat, sw_p),
+                               'qq': (qq_theoretical, qq_sample, qq_slope, qq_intercept)}
+
+    if ymax is None:
+        ymax = max(max(r['df']['pct_above'].max(), r['gm_mean'], r['wm_mean']) for r in results.values()) * 1.2
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 5.5), sharey=True)
+    for ax, condition in zip(axes, ('Flexion', 'Extension')):
+        r = results[condition]
+        gm_vals = r['df'][r['df']['tissue'] == 'GM']['pct_above']
+        wm_vals = r['df'][r['df']['tissue'] == 'WM']['pct_above']
+        box = ax.boxplot([gm_vals.values, wm_vals.values], positions=[0, 1], widths=0.35,
+                          showfliers=False, patch_artist=True, zorder=2)
+        for patch in box['boxes']:
+            patch.set_facecolor(to_rgba(TEAL, 0.4))
+            patch.set_edgecolor('black')
+            patch.set_linewidth(0.5)
+        for part in ('whiskers', 'caps', 'medians'):
+            for line in box[part]:
+                line.set_color('black')
+                line.set_linewidth(0.5)
+
+        # Spaghetti lines connecting each patient's GM/WM pair - the LMM's
+        # random intercept is modeling exactly this within-patient pairing.
+        wide = r['df'].pivot(index='patient', columns='tissue', values='pct_above')
+        for _, row in wide.iterrows():
+            if pd.notna(row.get('GM')) and pd.notna(row.get('WM')):
+                ax.plot([0, 1], [row['GM'], row['WM']], color='grey', linewidth=0.6, alpha=0.5, zorder=2.5)
+
+        marker = CONDITION_MARKERS[condition.lower()]
+        ax.scatter([0] * len(gm_vals), gm_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+        ax.scatter([1] * len(wm_vals), wm_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+        ax.scatter([0, 1], [r['gm_mean'], r['wm_mean']], marker='d', s=80, facecolor='red',
+                   edgecolor='black', linewidth=1.5, zorder=5)
+
+        p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
+        bracket_y, tick = (58 / 70) * ymax, (1.5 / 70) * ymax
+        ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+                color='black', linewidth=1.2, zorder=6)
+        ax.text(0.5, bracket_y + (1 / 70) * ymax, p_label, ha='center', va='bottom', fontsize=10)
+
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['GM', 'WM'])
+        ax.set_xlabel(condition)
+        ax.set_ylim(0, ymax)
+
+    axes[0].set_ylabel('% of tissue volume above threshold ({:g})'.format(threshold))
+    lme_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
+                          label='LME estimate')]
+    axes[0].legend(handles=lme_handle, loc='upper left', frameon=False)
+    fig.suptitle('{}: Grey Matter vs. White Matter'.format(title_prefix))
+    fig.tight_layout()
+    box_path = os.path.join(OUT_DIR, 'lmm_gmvswm_boxplot_{}.pdf'.format(tag))
+    fig.savefig(box_path, bbox_inches='tight')
+    plt.close(fig)
+    print("  Plot saved: {}".format(box_path))
+
+    sections = []
+    for condition in ('Flexion', 'Extension'):
+        r = results[condition]
+        sections.append("""\
+#### GM vs WM ({condition})
+
+$$y_i = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_i=\\text{{WM}}] + u_i + \\varepsilon_i$$
+
+- $y_i$: `pct_above` for patient $i$'s tissue observation (GM or WM), {condition} only
+- $\\beta_0$: intercept - expected `pct_above` for GM (the reference level)
+- $\\beta_{{\\text{{tissueWM}}}}$: fixed effect of WM vs GM
+- $u_i \\sim \\mathcal{{N}}(0,\\tau^2)$: random intercept per patient
+- $\\varepsilon_i \\sim \\mathcal{{N}}(0,\\sigma^2)$: residual error
+
+`lmer(pct_above ~ tissue + (1 | patient))`, {condition} data only
+
+$$H_0:\\ \\beta_{{\\text{{tissueWM}}}} = 0$$
+
+No difference in % of cord volume above MPS $={threshold:g}$ between grey and white \
+matter, within {condition} ({pct_lbl}).
+
+{coef_table}
+
+{random_effects}
+
+**Shapiro-Wilk (residuals)**: W = {sw_stat:.4g}, p = {sw_p:.4g}{sw_flag}
+""".format(condition=condition, threshold=threshold,
+           pct_lbl='not pooled with Extension' if condition == 'Flexion' else 'not pooled with Flexion',
+           coef_table=r_table_to_markdown_from_df(r['coef_df']),
+           random_effects=format_random_effects_md(r['varcorr_df']),
+           sw_stat=r['shapiro'][0], sw_p=r['shapiro'][1],
+           sw_flag=' (residuals deviate from normality)' if r['shapiro'][1] < 0.05 else ''))
+
+    return "\n".join(sections), results
+
+
+def save_gmvswm_qq_grid(entries, grid_path):
+    """entries: list of (row_label, condition, qq_tuple, sw_stat, sw_p),
+    qq_tuple = (theoretical, sample, line_slope, line_intercept) from R's
+    qqnorm()/qqline() (computed in _fit_one_condition_tissue_model - no
+    scipy dependency in this codebase). Grid rows = distinct row_label (in
+    order of first appearance), columns = Flexion/Extension - combines what
+    would otherwise be one QQ PDF per (state, condition) into one figure."""
+    row_labels = list(dict.fromkeys(e[0] for e in entries))
+    conditions = ('Flexion', 'Extension')
+    by_key = {(e[0], e[1]): e for e in entries}
+
+    fig, axes = plt.subplots(len(row_labels), 2, figsize=(9, 4.5 * len(row_labels)), squeeze=False)
+    for row_idx, row_label in enumerate(row_labels):
+        for col_idx, condition in enumerate(conditions):
+            ax = axes[row_idx][col_idx]
+            entry = by_key.get((row_label, condition))
+            if entry is None:
+                ax.axis('off')
+                continue
+            _, _, (qq_theoretical, qq_sample, qq_slope, qq_intercept), sw_stat, sw_p = entry
+            ax.scatter(qq_theoretical, qq_sample, color=NAVY, s=20, alpha=0.8)
+            line_x = [min(qq_theoretical), max(qq_theoretical)]
+            line_y = [qq_slope * x + qq_intercept for x in line_x]
+            ax.plot(line_x, line_y, color='red')
+            ax.set_xlabel('Theoretical Quantiles')
+            ax.set_ylabel('Sample Quantiles')
+            ax.set_title('{} ({})\nShapiro-Wilk: W={:.3g}, p={:.3g}'.format(row_label, condition, sw_stat, sw_p))
+
+    fig.tight_layout()
+    fig.savefig(grid_path, bbox_inches='tight')
+    plt.close(fig)
+    print("Plot saved: {}".format(grid_path))
+
+
+gmvswm_section_nopreload_t015, gmvswm_results_nopreload = run_gmvswm_lmm(
+    preop_nopreload_elements, 'preop_nopreload_t0p015', 'PreOp without Preload (threshold=0.015)', threshold=0.015)
+
+summary_md_nopreload_t015 = (
+    "### GM/WM linear mixed-effects model - PreOp without preload (threshold = 0.015)\n\n"
+    + PREAMBLE + "\n" + gmvswm_section_nopreload_t015
+)
+summary_md_nopreload_t015_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p015.md')
+with open(summary_md_nopreload_t015_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_nopreload_t015)
+print("")
+print("Summary saved: {}".format(summary_md_nopreload_t015_path))
+
+# PostOp GMvsWM LMM - COMMENTED OUT. At threshold=0.015, PostOp/GM is
+# heavily zero-inflated (boxes collapse onto the axis, Extension/GM has
+# effectively no spread) - the output doesn't give a meaningful comparison.
+# PreOp-no-preload above is unaffected and still runs.
+# gmvswm_section_postop_t015, gmvswm_results_postop = run_gmvswm_lmm(
+#     postop_elements, 'postop_t0p015', 'PostOp (threshold=0.015)', threshold=0.015)
+#
+# summary_md_postop_t015 = (
+#     "### GM/WM linear mixed-effects model - PostOp (threshold = 0.015)\n\n"
+#     + PREAMBLE + "\n" + gmvswm_section_postop_t015
+# )
+# summary_md_postop_t015_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p015.md')
+# with open(summary_md_postop_t015_path, 'w', encoding='utf-8') as f:
+#     f.write(summary_md_postop_t015)
+# print("")
+# print("Summary saved: {}".format(summary_md_postop_t015_path))
+
+# QQ grid - PreOp-no-preload only now (PostOp disabled above).
+gmvswm_qq_entries = []
+for gmvswm_row_label, gmvswm_state_results in (('PreOp (no preload)', gmvswm_results_nopreload),):
+    for gmvswm_condition in ('Flexion', 'Extension'):
+        gmvswm_r = gmvswm_state_results[gmvswm_condition]
+        gmvswm_qq_entries.append((gmvswm_row_label, gmvswm_condition, gmvswm_r['qq'],
+                                   gmvswm_r['shapiro'][0], gmvswm_r['shapiro'][1]))
+
+gmvswm_qq_grid_path = os.path.join(DIAG_DIR, 'lmm_gmvswm_residual_qq_combined.pdf')
+save_gmvswm_qq_grid(gmvswm_qq_entries, gmvswm_qq_grid_path)
+
+# ============================================================
+# ============================================================
+# STAGE 2: PreOp (with preload)
+# ============================================================
+# ============================================================
+STAGE2_RESULTS_DIR = os.path.join(SCRIPT_DIR, 'preop_results')
+STAGE2_DIAG_DIR = os.path.join(STAGE2_RESULTS_DIR, 'diagnostic_plots')
+STAGE2_CACHE_DIR = os.path.join(STAGE2_RESULTS_DIR, 'cache')
+os.makedirs(STAGE2_DIAG_DIR, exist_ok=True)
+os.makedirs(STAGE2_CACHE_DIR, exist_ok=True)
+
+print("")
+print("=" * 70)
+print("PART G: Per-patient blob-size distribution, PreOp (with preload)")
+print("=" * 70)
+
+# ============================================================
+# Per-patient faceted blob-size distribution (spatial clustering), PreOp
+# WITH preload only (State == 'preop', not 'preop-nopreload'). Grid only
+# (2x2, all 4 manual thresholds) - no individual per-threshold plots.
+# ============================================================
+MANUAL_THRESHOLDS = {'t0p05': 0.05, 't0p10': 0.10, 't0p15': 0.15, 't0p20': 0.20}
+
+s2blob_per_patient = {}   # (participant, loading_condition) -> reduced DataFrame, PreOp (with preload) only
+s2blob_missing = []
+for _, s2blob_row in id_map.iterrows():
+    if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
+        continue
+    s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
+    if s2blob_condition.strip().lower() not in ('flexion', 'extension'):
+        continue
+    s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
+    if not s2blob_csv_path or s2blob_csv_path.lower() == 'nan' or not os.path.isfile(s2blob_csv_path):
+        s2blob_missing.append(s2blob_row)
+        continue
+    s2blob_raw = pd.read_csv(s2blob_csv_path)
+    s2blob_per_patient[(int(s2blob_row['participant']), s2blob_condition)] = reduce_to_frame_mode(
+        s2blob_raw, FRAME_MODE)
+
+if s2blob_missing:
+    print("Skipping {} row(s) with no csv_path set in id_map.csv (or file not found):".format(len(s2blob_missing)))
+    for s2blob_row in s2blob_missing:
+        print("  P{} ({})".format(int(s2blob_row['participant']),
+                                   str(s2blob_row.get('loading_condition', '')).strip() or '?'))
+
+if not s2blob_per_patient:
+    raise SystemExit("No PreOp (with preload) patient data loaded - fill in csv_path in id_map.csv first.")
+
+# Blob adjacency cache, PreOp (with preload) only
+s2blob_adjacency_cache = {}
+s2blob_missing_topology = []
+for _, s2blob_row in id_map.iterrows():
+    if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
+        continue
+    s2blob_participant = int(s2blob_row['participant'])
+    s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
+    s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
+    s2blob_key = (s2blob_participant, s2blob_condition)
+    if s2blob_key not in s2blob_per_patient or not s2blob_csv_path or s2blob_csv_path.lower() == 'nan':
+        continue
+    s2blob_topology_path = s2blob_csv_path.replace('_mps.csv', '_topology.csv')
+    if not os.path.isfile(s2blob_topology_path):
+        s2blob_missing_topology.append(s2blob_key)
+        continue
+    s2blob_adjacency_cache[s2blob_key] = load_adjacency_edges(s2blob_topology_path)
+
+if s2blob_missing_topology:
+    print("Skipping {} patient/condition(s) missing '_topology.csv' for blob analysis:".format(
+        len(s2blob_missing_topology)))
+    for s2blob_participant, s2blob_condition in s2blob_missing_topology:
+        print("  P{} ({})".format(s2blob_participant, s2blob_condition))
+
+# For each (threshold, condition), pool blobs from every patient with adjacency data
+s2blob_records = []
+for s2blob_threshold_name, s2blob_threshold_val in MANUAL_THRESHOLDS.items():
+    for (s2blob_participant, s2blob_condition), s2blob_edges in s2blob_adjacency_cache.items():
+        s2blob_df_patient = s2blob_per_patient[(s2blob_participant, s2blob_condition)]
+        s2blob_vol_lookup = dict(zip(s2blob_df_patient['element_label'], s2blob_df_patient['volume']))
+        s2blob_exceeding = set(
+            s2blob_df_patient.loc[s2blob_df_patient['mps'] >= s2blob_threshold_val, 'element_label'])
+        if not s2blob_exceeding:
+            continue
+        for s2blob in find_blobs(s2blob_exceeding, s2blob_edges):
+            s2blob_volume = sum(s2blob_vol_lookup[lbl] for lbl in s2blob)
+            s2blob_r = (3.0 * s2blob_volume / (4.0 * math.pi)) ** (1.0 / 3.0)
+            s2blob_records.append({
+                'participant':       'P{}'.format(s2blob_participant),
+                'loading_condition': s2blob_condition,
+                'threshold':         s2blob_threshold_name,
+                'n_elements':        len(s2blob),
+                'volume':            s2blob_volume,
+                'r':                 s2blob_r,
+            })
+
+s2blob_df = pd.DataFrame(s2blob_records)
+s2blob_summary_path = os.path.join(STAGE2_RESULTS_DIR, 'multipatient_blob_distribution_summary.csv')
+s2blob_df.to_csv(s2blob_summary_path, index=False)
+print("Blob summary saved: {}".format(s2blob_summary_path))
+
+s2blob_patients_sorted = sorted(s2blob_df['participant'].unique(),
+                                 key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
+s2blob_patient_colors = {p: plt.cm.tab10(i % 10) for i, p in enumerate(s2blob_patients_sorted)}
+
+# Common x/y range across ALL thresholds, so every panel is directly comparable.
+s2blob_r_min = s2blob_df['r'].min()
+s2blob_r_max = s2blob_df['r'].max()
+s2blob_xlim = (s2blob_r_min * 0.9, s2blob_r_max * 1.1)
+s2blob_ylim = (0, 102)
+
+# Each patient's TOTAL CORD VOLUME (not exceeding-volume subset) - fixed
+# regardless of threshold, so a curve's final height shows the real % of
+# that patient's cord exceeding the threshold.
+s2blob_total_cord_vol = {key: df['volume'].sum() for key, df in s2blob_per_patient.items()}
+
+
+def s2blob_plot_threshold(ax, threshold_name):
+    sub = s2blob_df[s2blob_df['threshold'] == threshold_name]
+    for (s2blob_p, s2blob_c), grp in sub.groupby(['participant', 'loading_condition']):
+        grp_sorted = grp.sort_values('r')
+        s2blob_p_num = int(s2blob_p[1:])   # 'P6' -> 6, to match s2blob_per_patient's int key
+        s2blob_total_vol = s2blob_total_cord_vol.get((s2blob_p_num, s2blob_c), 0.0)
+        if s2blob_total_vol <= 0:
+            continue
+        s2blob_cum_pct = list(100.0 * grp_sorted['volume'].cumsum() / s2blob_total_vol)
+        s2blob_rs = [s2blob_xlim[0]] + list(grp_sorted['r']) + [s2blob_xlim[1]]
+        s2blob_ys = [0.0] + s2blob_cum_pct + [s2blob_cum_pct[-1]]
+        s2blob_color = s2blob_patient_colors[s2blob_p]
+        s2blob_linestyle = BLOB_CONDITION_LINESTYLES.get(s2blob_c.strip().lower(), ':')
+        ax.plot(s2blob_rs, s2blob_ys, color=s2blob_color, linestyle=s2blob_linestyle, linewidth=1.2,
+                 drawstyle='steps-post')
+    ax.set_xscale('log')
+    ax.set_xlim(s2blob_xlim)
+    ax.set_ylim(s2blob_ylim)
+    ax.xaxis.set_major_locator(PP_LOG_MAJOR_LOCATOR)
+    ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
+    ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), MANUAL_THRESHOLDS[threshold_name]))
+    ax.set_xlabel('MPS concentration effective radius r (mm)')
+    ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
+
+
+s2blob_patient_handles = [Line2D([0], [0], color=s2blob_patient_colors[p], linestyle='-',
+                                  label='{} (preop mJOA {})'.format(p, preop_mjoa_by_participant.get(p, '?')))
+                          for p in s2blob_patients_sorted]
+s2blob_condition_handles = [Line2D([0], [0], color='black', linestyle=ls, label=cond.capitalize())
+                             for cond, ls in BLOB_CONDITION_LINESTYLES.items()]
+
+s2blob_grid_fig, s2blob_grid_axes = plt.subplots(2, 2, figsize=(13, 10))
+for s2blob_ax_grid, s2blob_threshold_name in zip(s2blob_grid_axes.flat, MANUAL_THRESHOLDS):
+    s2blob_plot_threshold(s2blob_ax_grid, s2blob_threshold_name)
+
+s2blob_grid_fig.legend(handles=s2blob_patient_handles + s2blob_condition_handles,
+                        loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=8)
+s2blob_grid_fig.tight_layout()
+s2blob_grid_plot_path = os.path.join(
+    STAGE2_RESULTS_DIR, 'multipatient_mps_plot_blob_distribution_perpatient_grid_sortedbypreopmJOA.pdf')
+s2blob_grid_fig.savefig(s2blob_grid_plot_path, bbox_inches='tight')
+plt.close(s2blob_grid_fig)
+print("Plot saved: {}".format(s2blob_grid_plot_path))
+
+print("")
+print("=" * 70)
+print("PART H: GM/WM tissue boundary enrichment, PreOp (with preload)")
+print("=" * 70)
+
+# Reuses PREOP_THRESHOLDS/find_boundary_elements/pct_above_for_subset/
+# compute_tissue_region_pct_above/build_job_df/make_x_order/TISSUE_COLOR/
+# REGION_FILLED/plot_tissue_boundary/load_or_build_combined_df/run_dataset
+# defined in Stage 1's Part F above - only out_dir/cache_dir differ.
+print("=== PreOp (with preload) ===")
+preop_rows = id_map[
+    (id_map['State'].astype(str).str.strip().str.lower() == 'preop') &
+    (id_map['loading_condition'].astype(str).str.strip().str.lower().isin(['flexion', 'extension']))
+]
+preop_elements, preop_summary = run_dataset(
+    preop_rows, PREOP_THRESHOLDS, 'preop', 'PreOp (with preload)',
+    has_condition=True,
+    id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
+                        'loading_condition': str(row['loading_condition']).strip()},
+    out_dir=STAGE2_RESULTS_DIR, cache_dir=STAGE2_CACHE_DIR)
