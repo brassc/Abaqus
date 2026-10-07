@@ -2269,3 +2269,286 @@ for gmvswm_threshold_name, gmvswm_threshold_label in (('t0p10', 'Threshold 0.10'
 
 gmvswm_qq_grid_path_stage2 = os.path.join(STAGE2_DIAG_DIR, 'lmm_gmvswm_residual_qq_combined.pdf')
 save_gmvswm_qq_grid(gmvswm_qq_entries_stage2, gmvswm_qq_grid_path_stage2)
+
+# ============================================================
+# ============================================================
+# STAGE 3: Oscillation (PreOp only)
+# ============================================================
+# ============================================================
+STAGE3_RESULTS_DIR = os.path.join(SCRIPT_DIR, 'oscillation_results')
+STAGE3_DIAG_DIR = os.path.join(STAGE3_RESULTS_DIR, 'diagnostic_plots')
+STAGE3_CACHE_DIR = os.path.join(STAGE3_RESULTS_DIR, 'cache')
+os.makedirs(STAGE3_DIAG_DIR, exist_ok=True)
+os.makedirs(STAGE3_CACHE_DIR, exist_ok=True)
+
+print("")
+print("=" * 70)
+print("PART I: Oscillation, cumulative vs at-peak vs baseline (PreOp only)")
+print("=" * 70)
+
+# ============================================================
+# For the CSF-pulsation oscillation (Step-3 of each id_map.csv State=='PreOp',
+# loading_condition='Oscillation' job - PreOp oscillation only, NOT the
+# separate PostOp-oscillation rows id_map.csv also has), compare two
+# different % cord volume above threshold metrics, per patient:
+#   Cumulative - each element's own PEAK mps over the whole oscillation
+#   history, i.e. % of cord volume that exceeds the threshold AT SOME POINT.
+#   At-peak    - for each frame, % of cord volume exceeding the threshold
+#   SIMULTANEOUSLY; then the worst (max) frame across the whole history.
+# Cumulative >= At-peak always; the gap shows how spatially/temporally
+# spread the oscillation's strain excursions are. Thresholds 0.10/0.15
+# (oscillation jobs all have the preload applied, same magnitude as Stage 2).
+# Reuses id_map/preop_mjoa_by_participant/pct_volume_above/
+# reduce_to_frame_mode defined above.
+# ============================================================
+OSC_STATE_OSCILLATION = 'Oscillation'
+
+OSC_METRIC_CUMULATIVE = 'cumulative'
+OSC_METRIC_AT_PEAK = 'at_peak'
+OSC_METRIC_FILLED = {OSC_METRIC_CUMULATIVE: True, OSC_METRIC_AT_PEAK: False}   # solid vs hollow marker
+
+OSC_CACHE_THRESHOLDS = {'t0p10': 0.10, 't0p15': 0.15}
+OSC_CACHE_THRESHOLD_COLORS = {'t0p10': '#2e75b6', 't0p15': '#c00000'}
+OSC_CUM_PEAK_DISPLAY_THRESHOLDS = OSC_CACHE_THRESHOLDS
+OSC_DELTA_DISPLAY_THRESHOLDS = OSC_CACHE_THRESHOLDS
+
+# --- Cache: small derived summary (per-frame + cumulative pct_above per
+# participant per threshold) - not the full raw per-element-per-frame data. ---
+osc_own_cache_path = os.path.join(STAGE3_CACHE_DIR, 'cache_oscillation_cumulative_vs_peak_preop.csv')
+
+if os.path.isfile(osc_own_cache_path):
+    print("Loading cached summary: {}".format(osc_own_cache_path))
+    osc_cache_df = pd.read_csv(osc_own_cache_path)
+else:
+    print("No cache at {} yet - building it.".format(osc_own_cache_path))
+    osc_rows = id_map[
+        (id_map['loading_condition'].astype(str).str.strip().str.lower() == OSC_STATE_OSCILLATION.lower()) &
+        (id_map['State'].astype(str).str.strip().str.lower() == 'preop')
+    ]
+    if osc_rows.empty:
+        raise SystemExit("No rows with loading_condition == '{}' and State == 'PreOp' found in "
+                          "id_map.csv.".format(OSC_STATE_OSCILLATION))
+
+    osc_cache_rows = []
+    osc_missing = []
+    for _, osc_row in osc_rows.iterrows():
+        osc_participant = int(osc_row['participant'])
+        osc_csv_path = str(osc_row.get('csv_path', '')).strip()
+        if not osc_csv_path or osc_csv_path.lower() == 'nan' or not os.path.isfile(osc_csv_path):
+            osc_missing.append(osc_participant)
+            continue
+        osc_raw = pd.read_csv(osc_csv_path)
+
+        # At-peak: per-frame pct_above, for every frame of the oscillation history.
+        for osc_frame_idx, osc_frame_df in osc_raw.groupby('frame_index'):
+            osc_frame_value = osc_frame_df['frame_value'].iloc[0]
+            for osc_name, osc_val in OSC_CACHE_THRESHOLDS.items():
+                osc_cache_rows.append({
+                    'participant': osc_participant, 'metric': OSC_METRIC_AT_PEAK,
+                    'frame_index': osc_frame_idx, 'frame_value': osc_frame_value,
+                    'threshold': osc_name, 'pct_above': pct_volume_above(osc_frame_df, osc_val),
+                })
+
+        # Cumulative: element-wise peak over the whole history, then one pct_above per threshold.
+        osc_peak_reduced = reduce_to_frame_mode(osc_raw, 'peak')
+        for osc_name, osc_val in OSC_CACHE_THRESHOLDS.items():
+            osc_cache_rows.append({
+                'participant': osc_participant, 'metric': OSC_METRIC_CUMULATIVE,
+                'frame_index': None, 'frame_value': None,
+                'threshold': osc_name, 'pct_above': pct_volume_above(osc_peak_reduced, osc_val),
+            })
+
+    if osc_missing:
+        print("Skipping {} patient(s) with no csv_path set (or file not found):".format(len(osc_missing)))
+        for osc_p in osc_missing:
+            print("  P{}".format(osc_p))
+
+    if not osc_cache_rows:
+        raise SystemExit("No data loaded - check id_map.csv.")
+
+    osc_cache_df = pd.DataFrame(osc_cache_rows)
+    osc_cache_df.to_csv(osc_own_cache_path, index=False)
+    print("Cached summary: {}".format(osc_own_cache_path))
+
+osc_target_participants = sorted(osc_cache_df['participant'].unique())
+
+osc_participants = sorted(('P{}'.format(p) for p in osc_target_participants),
+                          key=lambda p: (preop_mjoa_by_participant.get(p, float('inf')), int(p[1:])))
+osc_x_pos = {p: i for i, p in enumerate(osc_participants)}
+
+# ============================================================
+# Summary + Plot 1: cumulative vs at-peak (worst frame) % cord volume above threshold
+# ============================================================
+osc_records = []
+for osc_p in osc_target_participants:
+    osc_p_label = 'P{}'.format(osc_p)
+    for osc_name in OSC_CUM_PEAK_DISPLAY_THRESHOLDS:
+        osc_cum_row = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
+                                    (osc_cache_df['metric'] == OSC_METRIC_CUMULATIVE) &
+                                    (osc_cache_df['threshold'] == osc_name)]
+        osc_peak_rows = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
+                                      (osc_cache_df['metric'] == OSC_METRIC_AT_PEAK) &
+                                      (osc_cache_df['threshold'] == osc_name)]
+        if osc_cum_row.empty or osc_peak_rows.empty:
+            continue
+        osc_cumulative_pct = osc_cum_row['pct_above'].iloc[0]
+        osc_at_peak_row = osc_peak_rows.loc[osc_peak_rows['pct_above'].idxmax()]
+        osc_records.append({
+            'participant': osc_p_label,
+            'threshold': osc_name,
+            'pct_above_cumulative': osc_cumulative_pct,
+            'pct_above_at_peak': osc_at_peak_row['pct_above'],
+            'at_peak_frame_index': osc_at_peak_row['frame_index'],
+            'at_peak_frame_value': osc_at_peak_row['frame_value'],
+            'gap_cumulative_minus_at_peak': osc_cumulative_pct - osc_at_peak_row['pct_above'],
+        })
+osc_summary = pd.DataFrame(osc_records)
+
+osc_summary_path = os.path.join(STAGE3_RESULTS_DIR, 'multipatient_mps_summary_oscillation_cumulative_vs_peak.csv')
+osc_summary.to_csv(osc_summary_path, index=False)
+print(osc_summary.to_string(index=False))
+
+print()
+print("Mean/median gap (cumulative - at-peak) by threshold:")
+print(osc_summary.groupby('threshold')['gap_cumulative_minus_at_peak'].agg(['mean', 'median']).to_string())
+
+osc_long_df = pd.concat([
+    osc_summary[['participant', 'threshold', 'pct_above_cumulative']].rename(
+        columns={'pct_above_cumulative': 'pct_above'}).assign(metric=OSC_METRIC_CUMULATIVE),
+    osc_summary[['participant', 'threshold', 'pct_above_at_peak']].rename(
+        columns={'pct_above_at_peak': 'pct_above'}).assign(metric=OSC_METRIC_AT_PEAK),
+], ignore_index=True)
+
+osc_fig, osc_ax = plt.subplots(figsize=(8, 5.5))
+
+for osc_name in OSC_CUM_PEAK_DISPLAY_THRESHOLDS:
+    osc_col_df = osc_long_df[osc_long_df['threshold'] == osc_name]
+    osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
+    for osc_participant, osc_grp in osc_col_df.groupby('participant'):
+        if len(osc_grp) == 2:
+            osc_xp = osc_x_pos[osc_participant]
+            osc_ax.vlines(osc_xp, osc_grp['pct_above'].min(), osc_grp['pct_above'].max(),
+                           color=osc_color, linewidth=1.0, alpha=0.5, zorder=2)
+    for osc_metric, osc_grp in osc_col_df.groupby('metric'):
+        osc_filled = OSC_METRIC_FILLED.get(osc_metric, True)
+        osc_xs = [osc_x_pos[p] for p in osc_grp['participant']]
+        if osc_filled:
+            osc_ax.scatter(osc_xs, osc_grp['pct_above'], color=osc_color, marker='o', s=55, zorder=3)
+        else:
+            osc_ax.scatter(osc_xs, osc_grp['pct_above'], facecolors='none', edgecolors=osc_color, marker='o',
+                            s=55, linewidths=1.3, zorder=3)
+
+osc_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
+                                 label='{:.2f}'.format(val))
+                          for name, val in OSC_CUM_PEAK_DISPLAY_THRESHOLDS.items()]
+osc_metric_handles = [
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black', label='Cumulative (ever exceeds)'),
+    Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none', label='At-peak (worst single frame)'),
+]
+osc_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+
+osc_all_handles = (
+    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_threshold_handles +
+    [osc_blank] +
+    [Line2D([0], [0], linestyle='none', marker='None', label='Metric')] + osc_metric_handles
+)
+osc_ax.legend(handles=osc_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+osc_ax.set_xticks(range(len(osc_participants)))
+osc_ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in osc_participants])
+osc_ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                 xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+osc_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+osc_ax.set_ylabel('% cord volume above threshold')
+osc_ax.set_title('Oscillation: cumulative (ever-exceeds) vs. at-peak (simultaneous) % cord volume')
+osc_fig.tight_layout()
+
+osc_plot_path = os.path.join(
+    STAGE3_RESULTS_DIR, 'multipatient_mps_plot_oscillation_cumulative_vs_peak_sortedbypreopmJOA.pdf')
+osc_fig.savefig(osc_plot_path, bbox_inches='tight')
+plt.close(osc_fig)
+
+print()
+print("Summary saved: {}".format(osc_summary_path))
+print("Plot saved: {}".format(osc_plot_path))
+
+# ============================================================
+# Plot 2: Delta (At-peak worst single frame MINUS Baseline) % cord volume
+# above threshold. Baseline is the pre-oscillation starting state
+# (frame_index==0 of the same Step-3, i.e. preload only, before any
+# oscillation displacement) - already in osc_cache_df as the frame_index==0
+# rows of the OSC_METRIC_AT_PEAK per-frame series.
+# ============================================================
+osc_delta_records = []
+for osc_p in osc_target_participants:
+    osc_p_label = 'P{}'.format(osc_p)
+    for osc_name in OSC_DELTA_DISPLAY_THRESHOLDS:
+        osc_peak_rows = osc_cache_df[(osc_cache_df['participant'] == osc_p) &
+                                      (osc_cache_df['metric'] == OSC_METRIC_AT_PEAK) &
+                                      (osc_cache_df['threshold'] == osc_name)]
+        osc_base_row = osc_peak_rows[osc_peak_rows['frame_index'] == 0]
+        if osc_peak_rows.empty or osc_base_row.empty:
+            continue
+        osc_at_peak_pct = osc_peak_rows['pct_above'].max()
+        osc_baseline_pct = osc_base_row['pct_above'].iloc[0]
+        osc_delta_records.append({
+            'participant': osc_p_label,
+            'threshold': osc_name,
+            'pct_above_baseline': osc_baseline_pct,
+            'pct_above_at_peak': osc_at_peak_pct,
+            'delta_at_peak_minus_baseline': osc_at_peak_pct - osc_baseline_pct,
+        })
+osc_delta_summary = pd.DataFrame(osc_delta_records)
+
+osc_delta_summary_path = os.path.join(
+    STAGE3_RESULTS_DIR, 'multipatient_mps_summary_oscillation_delta_at_peak_vs_baseline.csv')
+osc_delta_summary.to_csv(osc_delta_summary_path, index=False)
+print(osc_delta_summary.to_string(index=False))
+
+print()
+print("Mean/median delta (at-peak - baseline) by threshold:")
+print(osc_delta_summary.groupby('threshold')['delta_at_peak_minus_baseline'].agg(['mean', 'median']).to_string())
+
+osc_delta_min = osc_delta_summary['delta_at_peak_minus_baseline'].min()
+osc_delta_max = osc_delta_summary['delta_at_peak_minus_baseline'].max()
+osc_delta_pad = 0.1 * max(abs(osc_delta_min), abs(osc_delta_max), 1e-9)
+osc_delta_ylim = (osc_delta_min - osc_delta_pad, osc_delta_max + osc_delta_pad)
+
+osc_delta_fig, osc_delta_ax = plt.subplots(figsize=(8, 5.5))
+
+for osc_name in OSC_DELTA_DISPLAY_THRESHOLDS:
+    osc_col_df = osc_delta_summary[osc_delta_summary['threshold'] == osc_name]
+    osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
+    osc_xs = [osc_x_pos[p] for p in osc_col_df['participant']]
+    # alpha<1 so overlapping points (common here - many patients cluster near
+    # delta=0) show as visibly darker/stacked instead of hiding each other.
+    osc_delta_ax.scatter(osc_xs, osc_col_df['delta_at_peak_minus_baseline'], color=osc_color, marker='o', s=55,
+                          alpha=1, edgecolors='none', zorder=3)
+
+osc_delta_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
+osc_delta_ax.set_ylim(osc_delta_ylim)
+osc_delta_ax.set_xticks(range(len(osc_participants)))
+osc_delta_ax.set_xticklabels(['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in osc_participants])
+osc_delta_ax.annotate('mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                       xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+osc_delta_ax.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+osc_delta_ax.set_ylabel('Δ % cord volume above threshold\n(At-peak - Baseline)')
+osc_delta_ax.set_title('Oscillation: Δ % cord volume above threshold, worst single frame vs. pre-oscillation baseline')
+
+osc_delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
+                                       label='{:.2f}'.format(val))
+                                for name, val in OSC_DELTA_DISPLAY_THRESHOLDS.items()]
+osc_delta_ax.legend(
+    handles=[Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_delta_threshold_handles,
+    loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+osc_delta_fig.tight_layout()
+
+osc_delta_plot_path = os.path.join(
+    STAGE3_RESULTS_DIR, 'multipatient_mps_plot_oscillation_delta_at_peak_vs_baseline_sortedbypreopmJOA.pdf')
+osc_delta_fig.savefig(osc_delta_plot_path, bbox_inches='tight')
+plt.close(osc_delta_fig)
+
+print()
+print("Summary saved: {}".format(osc_delta_summary_path))
+print("Plot saved: {}".format(osc_delta_plot_path))
