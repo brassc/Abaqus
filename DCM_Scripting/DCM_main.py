@@ -13,6 +13,14 @@ import math
 import os
 from collections import defaultdict
 
+# Fixes a reproducibility quirk: matplotlib writes its PDF backend's
+# /CreationDate from the current time on every run, so re-running this
+# script with identical data still produces byte-different PDFs (git sees
+# every figure as "modified" even when nothing actually changed). Setting
+# SOURCE_DATE_EPOCH pins that timestamp instead - set before matplotlib
+# import, and setdefault so an externally-set value isn't clobbered.
+os.environ.setdefault('SOURCE_DATE_EPOCH', '1700000000')
+
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -1841,7 +1849,7 @@ def _fit_one_condition_tissue_model(elements_df, condition, threshold):
             qq_theoretical, qq_sample, qq_slope, qq_intercept)
 
 
-def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, ymax=None):
+def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None):
     """Fits GM vs WM completely separately for Flexion and Extension. Saves
     a 2-panel boxplot (Flexion left, Extension right, shared y-axis, with
     spaghetti lines connecting each patient's GM/WM pair). Residual QQ plots
@@ -1907,7 +1915,7 @@ def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, ymax=None):
     axes[0].legend(handles=lme_handle, loc='upper left', frameon=False)
     fig.suptitle('{}: Grey Matter vs. White Matter'.format(title_prefix))
     fig.tight_layout()
-    box_path = os.path.join(OUT_DIR, 'lmm_gmvswm_boxplot_{}.pdf'.format(tag))
+    box_path = os.path.join(out_dir, 'lmm_gmvswm_boxplot_{}.pdf'.format(tag))
     fig.savefig(box_path, bbox_inches='tight')
     plt.close(fig)
     print("  Plot saved: {}".format(box_path))
@@ -1983,7 +1991,8 @@ def save_gmvswm_qq_grid(entries, grid_path):
 
 
 gmvswm_section_nopreload_t015, gmvswm_results_nopreload = run_gmvswm_lmm(
-    preop_nopreload_elements, 'preop_nopreload_t0p015', 'PreOp without Preload (threshold=0.015)', threshold=0.015)
+    preop_nopreload_elements, 'preop_nopreload_t0p015', 'PreOp without Preload (threshold=0.015)',
+    threshold=0.015, out_dir=RESULTS_DIR)
 
 summary_md_nopreload_t015 = (
     "### GM/WM linear mixed-effects model - PreOp without preload (threshold = 0.015)\n\n"
@@ -2000,7 +2009,7 @@ print("Summary saved: {}".format(summary_md_nopreload_t015_path))
 # effectively no spread) - the output doesn't give a meaningful comparison.
 # PreOp-no-preload above is unaffected and still runs.
 # gmvswm_section_postop_t015, gmvswm_results_postop = run_gmvswm_lmm(
-#     postop_elements, 'postop_t0p015', 'PostOp (threshold=0.015)', threshold=0.015)
+#     postop_elements, 'postop_t0p015', 'PostOp (threshold=0.015)', threshold=0.015, out_dir=RESULTS_DIR)
 #
 # summary_md_postop_t015 = (
 #     "### GM/WM linear mixed-effects model - PostOp (threshold = 0.015)\n\n"
@@ -2202,3 +2211,35 @@ preop_elements, preop_summary = run_dataset(
     id_fn=lambda row: {'participant': 'P{}'.format(int(row['participant'])),
                         'loading_condition': str(row['loading_condition']).strip()},
     out_dir=STAGE2_RESULTS_DIR, cache_dir=STAGE2_CACHE_DIR)
+
+print("")
+print("=" * 70)
+print("PART H (cont.): GM vs WM LMM, PreOp (with preload), threshold=0.15")
+print("=" * 70)
+
+# Reuses _fit_one_condition_tissue_model/run_gmvswm_lmm/save_gmvswm_qq_grid/
+# PREAMBLE defined in Stage 1's Part F above - only out_dir/diag_dir differ.
+# Threshold is 0.15 here (not 0.015 as in Stage 1) - PreOp WITH preload has
+# much higher-magnitude strain, so the lower Stage-1 cutoff isn't appropriate.
+gmvswm_section_preop_t15, gmvswm_results_preop = run_gmvswm_lmm(
+    preop_elements, 'preop_t0p15', 'PreOp with Preload (threshold=0.15)',
+    threshold=0.15, out_dir=STAGE2_RESULTS_DIR)
+
+summary_md_preop_t15 = (
+    "### GM/WM linear mixed-effects model - PreOp with preload (threshold = 0.15)\n\n"
+    + PREAMBLE + "\n" + gmvswm_section_preop_t15
+)
+summary_md_preop_t15_path = os.path.join(STAGE2_RESULTS_DIR, 'lmm_summary_preop_t0p15.md')
+with open(summary_md_preop_t15_path, 'w', encoding='utf-8') as f:
+    f.write(summary_md_preop_t15)
+print("")
+print("Summary saved: {}".format(summary_md_preop_t15_path))
+
+gmvswm_qq_entries_stage2 = []
+for gmvswm_condition in ('Flexion', 'Extension'):
+    gmvswm_r = gmvswm_results_preop[gmvswm_condition]
+    gmvswm_qq_entries_stage2.append(('PreOp (with preload)', gmvswm_condition, gmvswm_r['qq'],
+                                      gmvswm_r['shapiro'][0], gmvswm_r['shapiro'][1]))
+
+gmvswm_qq_grid_path_stage2 = os.path.join(STAGE2_DIAG_DIR, 'lmm_gmvswm_residual_qq_combined.pdf')
+save_gmvswm_qq_grid(gmvswm_qq_entries_stage2, gmvswm_qq_grid_path_stage2)
