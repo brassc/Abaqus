@@ -1,10 +1,10 @@
-# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = 0.01)
+### PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = 0.01)
 
 GM and WM tested completely separately (does EITHER tissue's strain burden change with surgery - not whether surgery affects them differently). Each test tries a mixed model first (patient random intercept); falls back to a paired t-test if that random intercept is singular - which model actually ran is stated explicitly under each condition below. Flexion/Extension kept as separate tests, not pooled.
 
-# Grey Matter (GM)
+### Grey Matter (GM)
 
-## GM (Flexion): PreOp (no preload) vs PostOp
+#### GM (Flexion): PreOp (no preload) vs PostOp
 
 **Model used: linear mixed-effects model** (random intercept not singular).
 
@@ -30,23 +30,35 @@ No difference in % of GM volume above MPS $=0.01$ between PreOp (no preload) and
 
 **Shapiro-Wilk (residuals)**: W = 0.921, p = 0.06142
 
-## GM (Extension): PreOp (no preload) vs PostOp
+#### GM (Extension): PreOp (no preload) vs PostOp
 
-**Model used: paired t-test** (LMM random-intercept variance was singular - same situation as the whole-cord comparison - so it adds nothing over a plain paired comparison).
+**Model used: linear mixed-effects model** (random intercept not singular).
 
-$$H_0:\ \mu_{\Delta} = 0, \quad \Delta_i = \text{pct\_above}_{i,\text{PostOp}} - \text{pct\_above}_{i,\text{PreOp}}$$
+$$y_i = \beta_0 + \beta_{\text{statePostOp}}\,\mathbb{1}[\text{state}_i=\text{PostOp}] + u_i + \varepsilon_i$$
+
+$$H_0:\ \beta_{\text{statePostOp}} = 0$$
 
 No difference in % of GM volume above MPS $=0.01$ between PreOp (no preload) and PostOp, within Extension (not pooled with Flexion).
 
-| Term | Estimate | CI_low | CI_high | df | t | Pr(>\|t\|) |
-|---|---|---|---|---|---|---|
-| PostOp - PreOp (no preload) | -2.315 | -4.185 | -0.4454 | 10 | -2.759 | 0.02016 |
+| Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
+|---|---|---|---|---|---|
+| (Intercept) | 2.647 | 0.5703 | 22 | 4.641 | 0.0001261 |
+| statePostOp | -2.551 | 0.8015 | 11 | -3.183 | 0.008718 |
 
-**Shapiro-Wilk (paired differences)**: W = 0.8204, p = 0.01748 (deviates from normality)
+**Random effects**
 
-# White Matter (WM)
+| Group | Variance | Std.Dev. |
+|---|---|---|
+| patient | 0.0482 | 0.2195 |
+| Residual | 3.854 | 1.963 |
 
-## WM (Flexion): PreOp (no preload) vs PostOp
+**ICC = 0.012**
+
+**Shapiro-Wilk (residuals)**: W = 0.8909, p = 0.01391 (deviates from normality)
+
+### White Matter (WM)
+
+#### WM (Flexion): PreOp (no preload) vs PostOp
 
 **Model used: linear mixed-effects model** (random intercept not singular).
 
@@ -72,7 +84,7 @@ No difference in % of WM volume above MPS $=0.01$ between PreOp (no preload) and
 
 **Shapiro-Wilk (residuals)**: W = 0.9404, p = 0.1663
 
-## WM (Extension): PreOp (no preload) vs PostOp
+#### WM (Extension): PreOp (no preload) vs PostOp
 
 **Model used: linear mixed-effects model** (random intercept not singular).
 
@@ -84,16 +96,16 @@ No difference in % of WM volume above MPS $=0.01$ between PreOp (no preload) and
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 9.399 | 1.808 | 19.98 | 5.199 | 4.372e-05 |
-| statePostOp | -8.551 | 2.514 | 10 | -3.402 | 0.006749 |
+| (Intercept) | 9.838 | 1.679 | 21.97 | 5.858 | 6.827e-06 |
+| statePostOp | -8.963 | 2.331 | 11 | -3.845 | 0.002725 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 1.198 | 1.094 |
-| Residual | 34.75 | 5.895 |
+| patient | 1.232 | 1.11 |
+| Residual | 32.61 | 5.71 |
 
-**ICC = 0.033**
+**ICC = 0.036**
 
-**Shapiro-Wilk (residuals)**: W = 0.9187, p = 0.07152
+**Shapiro-Wilk (residuals)**: W = 0.9243, p = 0.07293

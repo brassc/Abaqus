@@ -1,8 +1,8 @@
-# GM/WM linear mixed-effects model - PostOp (threshold = 0.02)
+### GM/WM linear mixed-effects model - PostOp (threshold = 0.02)
 
 Patient is a random intercept; loading condition (Flexion/Extension) is kept as its own main-effect covariate rather than averaged away - they differ hugely in magnitude, so averaging would blend two different mechanical regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), not asymptotic z.
 
-## Model 1 (Flexion): GM vs WM
+#### Model 1 (Flexion): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
 
@@ -34,7 +34,7 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 
 **Shapiro-Wilk (residuals)**: W = 0.9242, p = 0.07244
 
-## Model 1 (Extension): GM vs WM
+#### Model 1 (Extension): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
 
@@ -52,16 +52,16 @@ No difference in % of cord volume above MPS $=0.02$ between grey and white matte
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 0.004256 | 0.1691 | 20 | 0.02517 | 0.9802 |
-| tissueWM | 0.5018 | 0.2376 | 10 | 2.112 | 0.06083 |
+| (Intercept) | 0.01193 | 0.1545 | 22 | 0.07721 | 0.9392 |
+| tissueWM | 0.5007 | 0.2169 | 11 | 2.308 | 0.04141 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 0.003905 | 0.06249 |
-| Residual | 0.3105 | 0.5573 |
+| patient | 0.004154 | 0.06445 |
+| Residual | 0.2823 | 0.5313 |
 
-**ICC = 0.012**
+**ICC = 0.015**
 
-**Shapiro-Wilk (residuals)**: W = 0.7311, p = 4.999e-05 (residuals deviate from normality)
+**Shapiro-Wilk (residuals)**: W = 0.7315, p = 2.71e-05 (residuals deviate from normality)

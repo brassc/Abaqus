@@ -127,6 +127,14 @@ P5,Flexion,t0p10,WM,Interior,0.0
 P5,Flexion,t0p15,WM,Interior,0.0
 P5,Flexion,t0p10,WM,Boundary,0.0
 P5,Flexion,t0p15,WM,Boundary,0.0
+P6,Extension,t0p10,GM,Interior,0.0
+P6,Extension,t0p15,GM,Interior,0.0
+P6,Extension,t0p10,GM,Boundary,0.0
+P6,Extension,t0p15,GM,Boundary,0.0
+P6,Extension,t0p10,WM,Interior,0.0427367229760918
+P6,Extension,t0p15,WM,Interior,0.0
+P6,Extension,t0p10,WM,Boundary,0.0
+P6,Extension,t0p15,WM,Boundary,0.0
 P6,Flexion,t0p10,GM,Interior,0.0
 P6,Flexion,t0p15,GM,Interior,0.0
 P6,Flexion,t0p10,GM,Boundary,0.0

@@ -1,8 +1,8 @@
-# Whole cord - PreOp (no preload) vs PostOp (threshold = 0.015)
+### Whole cord - PreOp (no preload) vs PostOp (threshold = 0.015)
 
 Tries a mixed model first (patient random intercept); falls back to a paired t-test if that random intercept is singular - which model actually ran is stated explicitly under each condition below (re-decided every run, not assumed from a past diagnostic). Flexion/Extension kept as separate tests, not pooled.
 
-## Whole cord (Flexion): PreOp (no preload) vs PostOp
+#### Whole cord (Flexion): PreOp (no preload) vs PostOp
 
 **Model used: linear mixed-effects model** (random intercept not singular).
 
@@ -28,7 +28,7 @@ No difference in % of whole cord volume above MPS $=0.015$ between PreOp (no pre
 
 **Shapiro-Wilk (residuals)**: W = 0.9319, p = 0.1074
 
-## Whole cord (Extension): PreOp (no preload) vs PostOp
+#### Whole cord (Extension): PreOp (no preload) vs PostOp
 
 **Model used: linear mixed-effects model** (random intercept not singular).
 
@@ -40,16 +40,16 @@ No difference in % of whole cord volume above MPS $=0.015$ between PreOp (no pre
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 4.748 | 0.8727 | 19.96 | 5.441 | 2.534e-05 |
-| statePostOp | -4.323 | 1.206 | 10 | -3.584 | 0.004976 |
+| (Intercept) | 5.022 | 0.8198 | 21.95 | 6.125 | 3.673e-06 |
+| statePostOp | -4.588 | 1.133 | 11 | -4.051 | 0.001911 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 0.3783 | 0.6151 |
-| Residual | 7.999 | 2.828 |
+| patient | 0.3692 | 0.6076 |
+| Residual | 7.696 | 2.774 |
 
-**ICC = 0.045**
+**ICC = 0.046**
 
-**Shapiro-Wilk (residuals)**: W = 0.9494, p = 0.307
+**Shapiro-Wilk (residuals)**: W = 0.9455, p = 0.2157

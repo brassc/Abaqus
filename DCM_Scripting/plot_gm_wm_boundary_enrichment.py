@@ -578,7 +578,7 @@ def run_model1_lmm(elements_df, tag, title_prefix, threshold=LMM_THRESHOLD, ymax
     for condition in ('Flexion', 'Extension'):
         r = results[condition]
         sections.append("""\
-## Model 1 ({condition}): GM vs WM
+#### Model 1 ({condition}): GM vs WM
 
 $$y_i = \\beta_0 + \\beta_{{\\text{{tissueWM}}}}\\,\\mathbb{{1}}[\\text{{tissue}}_i=\\text{{WM}}] + u_i + \\varepsilon_i$$
 
@@ -708,7 +708,7 @@ model1_section_preop = run_model1_lmm(preop_elements, 'preop', 'PreOp with Prelo
 model2_section = ""
 
 summary_md_preop = (
-    "# GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)\n\n"
+    "### GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)\n\n"
     + PREAMBLE + "\n" + model1_section_preop + "\n" + model2_section
 )
 summary_md_preop_path = os.path.join(OUT_DIR, 'lmm_summary_preop.md')
@@ -724,7 +724,7 @@ model1_section_nopreload = run_model1_lmm(preop_nopreload_elements, 'preop_nopre
                                            threshold=NOPRELOAD_THRESHOLD, ymax=70)
 
 summary_md_nopreload = (
-    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_nopreload
 )
 summary_md_nopreload_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload.md')
@@ -741,7 +741,7 @@ model1_section_postop = run_model1_lmm(postop_elements, 'postop', 'PostOp',
                                         threshold=NOPRELOAD_THRESHOLD, ymax=70)
 
 summary_md_postop = (
-    "# GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_postop
 )
 summary_md_postop_path = os.path.join(OUT_DIR, 'lmm_summary_postop.md')
@@ -953,7 +953,7 @@ def run_prepost_tissue_state(preop_df, postop_df, tissue, tag, threshold=NOPRELO
             extra = sw_line
 
         sections.append("""\
-## {tissue} ({condition}): PreOp (no preload) vs PostOp
+#### {tissue} ({condition}): PreOp (no preload) vs PostOp
 
 {model_note}
 
@@ -988,9 +988,9 @@ as separate tests, not pooled.
 """
 
 summary_md_tissue_state = (
-    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
-    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm
-    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm
+    "### PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n### Grey Matter (GM)\n\n" + tissue_state_section_gm
+    + "\n### White Matter (WM)\n\n" + tissue_state_section_wm
 )
 summary_md_tissue_state_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state.md')
 with open(summary_md_tissue_state_path, 'w', encoding='utf-8') as f:
@@ -1212,7 +1212,7 @@ def run_wholecord_state(df, tag, threshold=NOPRELOAD_THRESHOLD, ymax=None):
             extra = sw_line
 
         sections.append("""\
-## Whole cord ({condition}): PreOp (no preload) vs PostOp
+#### Whole cord ({condition}): PreOp (no preload) vs PostOp
 
 {model_note}
 
@@ -1244,7 +1244,7 @@ tests, not pooled.
 """
 
 summary_md_wholecord = (
-    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
+    "### Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(NOPRELOAD_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section
 )
 summary_md_wholecord_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost.md')
@@ -1268,7 +1268,7 @@ print("=== Linear mixed-effects models: PreOp (no preload), threshold={:.2f} ===
 model1_section_nopreload_t01 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p01',
                                                'PreOp without Preload (threshold=0.01)', threshold=LOW_THRESHOLD)
 summary_md_nopreload_t01 = (
-    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_nopreload_t01
 )
 summary_md_nopreload_t01_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p01.md')
@@ -1285,7 +1285,7 @@ print("Summary saved: {}".format(summary_md_nopreload_t01_path))
 # model1_section_postop_t01 = run_model1_lmm(postop_elements, 'postop_t0p01',
 #                                             'PostOp (threshold=0.01)', threshold=LOW_THRESHOLD)
 # summary_md_postop_t01 = (
-#     "# GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+#     "### GM/WM linear mixed-effects model - PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
 #     + PREAMBLE + "\n" + model1_section_postop_t01
 # )
 # summary_md_postop_t01_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p01.md')
@@ -1305,9 +1305,9 @@ tissue_state_section_wm_t01 = run_prepost_tissue_state(preop_nopreload_elements,
                                                         'prepost_t0p01', threshold=LOW_THRESHOLD)
 
 summary_md_tissue_state_t01 = (
-    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
-    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t01
-    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t01
+    "### PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n### Grey Matter (GM)\n\n" + tissue_state_section_gm_t01
+    + "\n### White Matter (WM)\n\n" + tissue_state_section_wm_t01
 )
 summary_md_tissue_state_t01_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p01.md')
 with open(summary_md_tissue_state_t01_path, 'w', encoding='utf-8') as f:
@@ -1319,7 +1319,7 @@ print("")
 print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.2f} ===".format(LOW_THRESHOLD))
 wholecord_section_t01 = run_wholecord_state(whole_cord_df, 'prepost_t0p01', threshold=LOW_THRESHOLD)
 summary_md_wholecord_t01 = (
-    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
+    "### Whole cord - PreOp (no preload) vs PostOp (threshold = {:.2f})\n\n".format(LOW_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t01
 )
 summary_md_wholecord_t01_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p01.md')
@@ -1341,7 +1341,7 @@ print("=== Linear mixed-effects models: PreOp (no preload), threshold={:.3f} ===
 model1_section_nopreload_t015 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p015',
                                                 'PreOp without Preload (threshold=0.015)', threshold=MID_THRESHOLD)
 summary_md_nopreload_t015 = (
-    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PreOp without preload (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_nopreload_t015
 )
 summary_md_nopreload_t015_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p015.md')
@@ -1355,7 +1355,7 @@ print("=== Linear mixed-effects models: PostOp, threshold={:.3f} ===".format(MID
 model1_section_postop_t015 = run_model1_lmm(postop_elements, 'postop_t0p015',
                                              'PostOp (threshold=0.015)', threshold=MID_THRESHOLD)
 summary_md_postop_t015 = (
-    "# GM/WM linear mixed-effects model - PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_postop_t015
 )
 summary_md_postop_t015_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p015.md')
@@ -1375,9 +1375,9 @@ tissue_state_section_wm_t015 = run_prepost_tissue_state(preop_nopreload_elements
                                                          'prepost_t0p015', threshold=MID_THRESHOLD)
 
 summary_md_tissue_state_t015 = (
-    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
-    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t015
-    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t015
+    "### PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n### Grey Matter (GM)\n\n" + tissue_state_section_gm_t015
+    + "\n### White Matter (WM)\n\n" + tissue_state_section_wm_t015
 )
 summary_md_tissue_state_t015_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p015.md')
 with open(summary_md_tissue_state_t015_path, 'w', encoding='utf-8') as f:
@@ -1389,7 +1389,7 @@ print("")
 print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:.3f} ===".format(MID_THRESHOLD))
 wholecord_section_t015 = run_wholecord_state(whole_cord_df, 'prepost_t0p015', threshold=MID_THRESHOLD)
 summary_md_wholecord_t015 = (
-    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
+    "### Whole cord - PreOp (no preload) vs PostOp (threshold = {:.3f})\n\n".format(MID_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t015
 )
 summary_md_wholecord_t015_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p015.md')
@@ -1412,7 +1412,7 @@ print("=== Linear mixed-effects models: PreOp (no preload), threshold={:g} ===".
 model1_section_nopreload_t03 = run_model1_lmm(preop_nopreload_elements, 'preop_nopreload_t0p03',
                                                'PreOp without Preload (threshold=0.03)', threshold=HIGH_THRESHOLD)
 summary_md_nopreload_t03 = (
-    "# GM/WM linear mixed-effects model - PreOp without preload (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PreOp without preload (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_nopreload_t03
 )
 summary_md_nopreload_t03_path = os.path.join(OUT_DIR, 'lmm_summary_preop_nopreload_t0p03.md')
@@ -1426,7 +1426,7 @@ print("=== Linear mixed-effects models: PostOp, threshold={:g} ===".format(HIGH_
 model1_section_postop_t03 = run_model1_lmm(postop_elements, 'postop_t0p03',
                                             'PostOp (threshold=0.03)', threshold=HIGH_THRESHOLD)
 summary_md_postop_t03 = (
-    "# GM/WM linear mixed-effects model - PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    "### GM/WM linear mixed-effects model - PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
     + PREAMBLE + "\n" + model1_section_postop_t03
 )
 summary_md_postop_t03_path = os.path.join(OUT_DIR, 'lmm_summary_postop_t0p03.md')
@@ -1446,9 +1446,9 @@ tissue_state_section_wm_t03 = run_prepost_tissue_state(preop_nopreload_elements,
                                                         'prepost_t0p03', threshold=HIGH_THRESHOLD)
 
 summary_md_tissue_state_t03 = (
-    "# PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
-    + TISSUE_STATE_PREAMBLE + "\n# Grey Matter (GM)\n\n" + tissue_state_section_gm_t03
-    + "\n# White Matter (WM)\n\n" + tissue_state_section_wm_t03
+    "### PreOp (no preload) vs PostOp, GM and WM tested separately (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    + TISSUE_STATE_PREAMBLE + "\n### Grey Matter (GM)\n\n" + tissue_state_section_gm_t03
+    + "\n### White Matter (WM)\n\n" + tissue_state_section_wm_t03
 )
 summary_md_tissue_state_t03_path = os.path.join(OUT_DIR, 'summary_prepost_tissue_state_t0p03.md')
 with open(summary_md_tissue_state_t03_path, 'w', encoding='utf-8') as f:
@@ -1460,7 +1460,7 @@ print("")
 print("=== Whole cord: PreOp (no preload) vs PostOp, threshold={:g} ===".format(HIGH_THRESHOLD))
 wholecord_section_t03 = run_wholecord_state(whole_cord_df, 'prepost_t0p03', threshold=HIGH_THRESHOLD)
 summary_md_wholecord_t03 = (
-    "# Whole cord - PreOp (no preload) vs PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
+    "### Whole cord - PreOp (no preload) vs PostOp (threshold = {:g})\n\n".format(HIGH_THRESHOLD)
     + WHOLECORD_PREAMBLE + "\n" + wholecord_section_t03
 )
 summary_md_wholecord_t03_path = os.path.join(OUT_DIR, 'summary_wholecord_prepost_t0p03.md')

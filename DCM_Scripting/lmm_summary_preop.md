@@ -1,8 +1,8 @@
-# GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)
+### GM/WM linear mixed-effects models - PreOp with preload (threshold = 0.10)
 
 Patient is a random intercept; loading condition (Flexion/Extension) is kept as its own main-effect covariate rather than averaged away - they differ hugely in magnitude, so averaging would blend two different mechanical regimes into one number. Satterthwaite-df t-tests (R `lme4`/`lmerTest`), not asymptotic z.
 
-## Model 1 (Flexion): GM vs WM
+#### Model 1 (Flexion): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
 
@@ -34,7 +34,7 @@ No difference in % of cord volume above MPS $=0.1$ between grey and white matter
 
 **Shapiro-Wilk (residuals)**: W = 0.9755, p = 0.8007
 
-## Model 1 (Extension): GM vs WM
+#### Model 1 (Extension): GM vs WM
 
 $$y_i = \beta_0 + \beta_{\text{tissueWM}}\,\mathbb{1}[\text{tissue}_i=\text{WM}] + u_i + \varepsilon_i$$
 
