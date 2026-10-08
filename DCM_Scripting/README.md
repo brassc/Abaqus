@@ -399,14 +399,9 @@ Post-processing pipeline for extracting maximum principal strain (MPS) and volum
 
   Also auto-updates `id_map.csv`: after writing, it finds the row whose `odb_path` matches the `ODB_PATH` you set and fills in `csv_path` — no manual copy-paste needed. If no matching row exists yet, it prints a warning instead of failing.
 
-- **mps_common.py** (Python 3) — shared helpers used by every script below:
-  - `volume_weighted_percentile(df, p)` — the MPS value below which fraction `p` of total *volume* (not element count) lies. Weighting by volume rather than counting elements equally matters when comparing regions/patients with different mesh densities.
-  - `pct_volume_above(df, threshold)` — % of total volume with `mps >= threshold`.
-  - `PLOT_STYLE` — shared matplotlib rcParams.
+- **mps_common.py** — archived (`archive/`). Was a shared-helpers module (`volume_weighted_percentile`, `pct_volume_above`, `PLOT_STYLE`) imported only by the now-archived analysis scripts; `DCM_main.py` has its own inlined copies of the same helpers.
 
-- **Alex_results_plotting.py** (Python 3) — single-patient time-history diagnostic. Point `CSV_PATH` at one patient's `_mps.csv`. Computes T95/T99 from the **last frame**, then tracks % volume above those thresholds across **every** frame, to check whether exceedance peaks at the final frame or earlier in the simulation. Prints and logs the result to `id_map.csv` (matched by `csv_path`) in three new columns: `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx`. Run this once per patient/condition to build a peak-frame log across the cohort — it's what decides `FRAME_MODE` below.
-
-- **Alex_results_multipatient_plot - compare_threshold.py** (Python 3) — the main cross-patient comparison script. Reads `id_map.csv`, loads every patient's `_mps.csv`, and produces five plots in one run (see [Output plots](#output-plots) below).
+- **Alex_results_plotting.py**, **"Alex_results_multipatient_plot - compare_threshold.py"**, **plot_gm_wm_boundary_enrichment.py**, **plot_preload_effect.py**, **plot_oscillation_effect.py** — archived (`archive/`). Their analyses are now covered by `DCM_main.py`, which is the current entry point for all results analysis (see its own docstring/stage headers for what each stage reproduces). Kept for reference only; not part of the live workflow.
 
 ### `id_map.csv`
 
@@ -421,7 +416,7 @@ Gitignored — maps an anonymized participant number to the real patient ID and 
 | `State` | `PreOp` or `PostOp` |
 | `odb_path` | Full path to the job's `.odb` |
 | `csv_path` | Full path to the `_mps.csv` (auto-filled by `Alex_results_extraction.py`) |
-| `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx` | Logged by `Alex_results_plotting.py`'s diagnostic |
+| `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx` | Logged by the archived `Alex_results_plotting.py` diagnostic |
 
 **Anonymization boundary:** `id_map.csv` and the raw per-frame `_mps.csv`/`_topology.csv` files (which live next to the `.odb`, typically on `D:\`, outside the repo) are never committed. Only the aggregated summary CSVs and plots produced by the multipatient script — keyed solely by `P{n}` — are safe to commit.
 
@@ -434,20 +429,11 @@ Gitignored — maps an anonymized participant number to the real patient ID and 
    execfile('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting\\Alex_results_extraction.py')
    ```
    `csv_path` gets filled in automatically once this finishes.
-3. Run `Alex_results_plotting.py` on at least one representative patient's CSV to check whether strain exceedance peaks at the final frame or earlier. If it peaks earlier and relaxes by the end, use `FRAME_MODE = 'peak'` (each element's max-ever MPS across all frames); if it peaks at the final frame, `'last'` is adequate.
-4. Set `FRAME_MODE` at the top of `Alex_results_multipatient_plot - compare_threshold.py` accordingly, then run it (`python "Alex_results_multipatient_plot - compare_threshold.py"`).
+3. Run `DCM_main.py` (`execfile('DCM_main.py')` or `python DCM_main.py`, per the Python-version split at the top of this file) — it reads `id_map.csv` directly and produces every stage's plots/summaries/caches under `preopnopreloadvspostop_results/`, `preop_results/`, and `oscillation_results/`.
 
 ### Output plots
 
-| File | Shows |
-|---|---|
-| `multipatient_mps_plot_compare_thresholds.pdf` | % cord volume above T90/T95/T99 (cohort-pooled volume-weighted percentiles) per patient, flexion vs extension (PreOp only) |
-| `multipatient_mps_plot_compare_thresholds_manual_thresholds.pdf` | Same style, fixed MPS thresholds 0.05/0.10/0.15/0.20 instead of percentiles (PreOp only) |
-| `multipatient_mps_plot_blob_distribution.pdf` | Cumulative % of total cord volume above each threshold, by spatial cluster ("blob") size — pooled across all patients per (threshold, condition). Distinguishes a few large contiguous high-strain regions from many small scattered ones |
-| `multipatient_mps_plot_blob_distribution_perpatient_*.pdf` (×4) + `..._perpatient_grid.pdf` | Same blob analysis, faceted per patient (one curve per patient, normalized to their own total cord volume) instead of pooled — one plot per threshold, plus a combined 2×2 grid |
-| `multipatient_mps_plot_compare_thresholds_manual_thresholds_prepost.pdf` | Manual-threshold comparison (0.10/0.15 shown) **including PostOp** — solid markers = PreOp, hollow = PostOp |
-
-Every plot has a matching `_summary.csv` written alongside it.
+See the stage result folders (`preopnopreloadvspostop_results/`, `preop_results/`, `oscillation_results/`) produced by `DCM_main.py` — each contains its own plots, `summary_*.md` write-ups, and `cache/`/`diagnostic_plots/` subfolders. The older flat `multipatient_mps_plot_*.pdf`/`.csv` naming from the archived scripts is no longer produced.
 
 ### Methodology notes
 
