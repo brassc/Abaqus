@@ -4,18 +4,19 @@ Scripts for applying spatially-varying predefined fields to spinal cord FE model
 
 ## Scripts
 
-- **sets_scaled_inpmod_gm_script.py** ⭐ **PRIMARY — USE THIS** ⭐ — Extends `sets_scaled_inpmod_overlap.py` with `CORD_SET_NAME` filtering for models where the cord shares a combined part instance with other anatomy. Requires a `Cord` assembly node set (GM + WM combined). Includes all features: preload scaling, overlap detection and resolution, summary file output (Abaqus Python 2.7).
-- **sets_scaled_inpmod_script.py** - Extends `sets_inpmod_script.py` with automatic per-site preload scaling based on sagittal cord diameter measurements. Use only if the cord IS its own separate assembly instance (Abaqus Python 2.7).
-- **sets_scaled_inpmod_overlap.py** - Extends `sets_scaled_inpmod_script.py` with automatic detection and resolution of overlapping node assignments across multiple compression sites, plus a structured summary output file. Does **not** have `CORD_SET_NAME` filtering — use `sets_scaled_inpmod_gm_script.py` instead (Abaqus Python 2.7).
-- **sets_inpmod_script.py** - Writes node sets and predefined fields directly into the `.inp` file without preload scaling. Superceded by `sets_scaled_inpmod_script.py` (Abaqus Python 2.7).
-- **sets_script.py** - Original version using the Abaqus CAE API. **Not recommended** — creates assembly-level sets via the API which can corrupt the assembly tree (see below). Retained for reference only (Abaqus Python 2.7).
+- **sets_scaled_inpmod_gm_script.py** — writes node sets and predefined fields (preload scaling, multi-site overlap detection/resolution, summary file output) directly into an existing `.inp` file. Requires a `Cord` assembly node set (GM + WM combined) for models where the cord shares a combined part instance with other anatomy (Abaqus Python 2.7).
+- **remove_preload.py** — copies a PreOp job's `.inp` with its compression-site preload (Step-1 predefined fields) stripped out, leaving Step-2 (flexion/extension) untouched; writes a renumbered sibling job folder, never modifies the source (Abaqus Python 2.7 / `abaqus python`).
+- **oscillation.py** — see [Cord Oscillation Modeling](#cord-oscillation-modeling-oscillationpy) below.
 - **field_band_plot.py** - Visualises the raised cosine field distribution (Python 3, matplotlib)
 - **coordinates.csv** - Compression site coordinates (center, upper, lower points per site) — basic format without cord diameters
 - **coordinates_scaled.csv** - Compression site coordinates with sagittal cord diameter measurements for preload scaling and overlap resolution
+- **Alex_results_extraction.py**, **Alex_results_extraction_GM_WM.py**, **Alex_results_extraction_IVD.py**, **DCM_main.py** — see [Results Extraction and Analysis](#results-extraction-and-analysis) below.
 
 ---
 
-## Usage: sets_scaled_inpmod_gm_script.py ⭐ PRIMARY
+## Usage: sets_scaled_inpmod_gm_script.py
+
+This script is used when building the model to apply preload that is scaled. 
 
 Use this script when the spinal cord **shares a combined part instance** with other anatomy (bone, disc, ligaments) — i.e. the cord is NOT its own separate assembly instance.
 
@@ -57,80 +58,6 @@ execfile('sets_scaled_inpmod_gm_script.py')
 If `CORD_SET_NAME` is not set, all nodes in `INSTANCE_NAME` are classified.
 
 **Point placement guidance:** upper, center, and lower points define the axis vector (`normalize(upper - lower)`). Place all three on the **same face and same mesh layer** of the cord surface. Mixing mesh layers on the same face introduces an artificial tilt into the axis vector, creating non-uniform temperature across the cord cross-section. Ensure `upper_cord_sag_dist` > `indent_cord_sag_dist` — swapping these produces negative field values.
-fff
-For overlap detection behaviour, output file naming, and summary file format, see the `sets_scaled_inpmod_overlap.py` section below — `sets_scaled_inpmod_gm_script.py` uses the same three-pass approach with identical output.
-
----
-
----
-
-## Other scripts (secondary / legacy)
-
----
-
-## Usage: sets_script.py (CAE API — not recommended)
-
-Run in Abaqus CAE kernel:
-
-```python
-os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-
-MODEL_NAME = 'Model-1'
-INSTANCE_NAME = 'PART-1_1-1'
-
-# Option 1 - Single site
-CENTER_POINT = (x, y, z)
-UPPER_POINT = (x, y, z)
-LOWER_POINT = (x, y, z)
-execfile('sets_script.py')
-
-# Option 2 - Multiple sites from CSV (takes priority if set)
-COORDS_FILE = 'coordinates.csv'
-execfile('sets_script.py')
-```
-
-## Usage: sets_inpmod_script.py (direct .inp modification — superceded)
-
-This script exists because creating assembly-level sets via the Abaqus Python API (`assembly.Set`) can corrupt the assembly tree into sub-assemblies, causing the `.inp` writer to silently drop the sets and predefined fields. This script bypasses the CAE entirely by inserting `*Nset` and `*Temperature` keywords directly into an existing `.inp` file.
-
-**Prerequisites:** You must have already written a `.inp` file from your model (e.g. via Job Manager or `mdb.jobs['Job-1'].writeInput()`). The script reads node coordinates from the CAE model but writes all output to a new `.inp` file (e.g. `Job-212.inp` -> `Job-212_modified.inp`). The original file is not modified.
-
-Run in Abaqus CAE kernel:
-
-```python
-os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-
-MODEL_NAME = 'Model-1'
-INSTANCE_NAME = 'PART-1_1-1'
-INP_FILE = 'Job-212.inp'
-PEAK_FIELD_VALUE = 0.15  # optional, defaults to 0.15
-
-# Option 1 - Single site
-CENTER_POINT = (x, y, z)
-UPPER_POINT = (x, y, z)
-LOWER_POINT = (x, y, z)
-execfile('sets_inpmod_script.py')
-
-# Option 2 - Multiple sites from CSV (takes priority if set)
-COORDS_FILE = 'coordinates.csv'
-execfile('sets_inpmod_script.py')
-```
-
-The script inserts:
-- `*Nset` blocks before `*End Assembly`
-- `*Temperature` blocks after `** PREDEFINED FIELDS` in the step section
-
-It will skip writing if the sets already exist in the `.inp` file to avoid duplicates.
-
-CSV format:
-```
-site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,lower_z
-Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0
-```
-
-## Usage: sets_scaled_inpmod_script.py (direct .inp modification with preload scaling — use gm_script instead if cord shares an instance)
-
-This script extends `sets_inpmod_script.py` with automatic per-site preload scaling. It is intended for use across multiple indent sites or patients where cord geometry varies. All `.inp` file handling is identical to `sets_inpmod_script.py`; the only difference is how the peak field value (preload) is determined.
 
 ### Preload scaling
 
@@ -175,58 +102,13 @@ Reference calibration constants (fixed — define the geometry at which preload 
 
 The calibration constants only need overriding if the reference site itself changes.
 
-### Usage
-
-Run in Abaqus CAE kernel:
-
-```python
-os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-
-MODEL_NAME    = 'Model-1'
-INSTANCE_NAME = 'PART-1_1-1'
-INP_FILE      = 'Job-212.inp'
-
-# Option 1 - Single site (manual PEAK_FIELD_VALUE, no scaling)
-PEAK_FIELD_VALUE = 0.5
-CENTER_POINT = (x, y, z)
-UPPER_POINT  = (x, y, z)
-LOWER_POINT  = (x, y, z)
-execfile('sets_scaled_inpmod_script.py')
-
-# Option 2 - Multiple sites from CSV (scaling applied automatically per site)
-PEAK_FIELD_VALUE = 0.3    # desired preload at reference site; all others scale from this (default)
-COORDS_FILE = 'coordinates.csv'
-execfile('sets_scaled_inpmod_script.py')
-```
-
-CSV format:
-```
-site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,lower_z,upper_cord_sag_dist,indent_cord_sag_dist
-Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
-```
-
-The columns `upper_cord_sag_dist` and `indent_cord_sag_dist` are optional. If absent, `PEAK_FIELD_VALUE` is applied directly with no scaling. `PEAK_FIELD_VALUE` defaults to `REFERENCE_PRELOAD` (0.3) if not set.
-
----
-
-## Usage: sets_scaled_inpmod_overlap.py (multi-site with overlap detection)
-
-This script extends `sets_scaled_inpmod_script.py` for multi-level DCM cases where compression sites at adjacent vertebral levels may have overlapping band regions. It uses a three-pass approach: classify all sites, resolve overlaps, then write the `.inp` file.
-
-### When to use this script vs `sets_scaled_inpmod_gm_script.py`
-
-| Scenario | Script to use |
-|---|---|
-| Single compression site | Either script (single-site path is identical in both) |
-| Multiple non-overlapping sites | Either script |
-| Multiple sites at adjacent levels (e.g. C4/5 and C5/6) | `sets_scaled_inpmod_gm_script.py` (primary) or this script if cord is its own instance |
-| Anterior + posterior compression at the same level | Define as **one site** in the CSV (see below), either script |
-
 ### Overlap detection and resolution rule
+
+Compression sites at adjacent vertebral levels (e.g. C4/5 and C5/6) use a **three-pass approach**: classify all sites into bands, resolve any contested nodes, then write the `.inp` file.
 
 When classifying nodes into bands, a node near the boundary between two adjacent compression levels may fall inside the band regions of **both** sites. Without resolution, both sites would write a predefined temperature field to that node in the `.inp` file — leading to conflicting or double-loaded boundary conditions.
 
-`sets_scaled_inpmod_overlap.py` resolves this automatically using the **minimum-field-value rule**:
+The script resolves this automatically using the **minimum-field-value rule**:
 
 > For each contested node, compute the field value each competing site would assign it based on which band it falls in and that site's raised-cosine profile. Assign the node exclusively to the site giving it the **lower** field value. Remove it from all other sites' bands.
 
@@ -261,31 +143,9 @@ Two files are written to the same directory as the input `.inp` file:
   - Overlap resolution table with plain-English explanation of what was adjusted and why
   - Per-site summary tables showing node set names, node counts, field values, and predefined field names for each band
 
-### Usage
+### CSV format (multi-site)
 
-Run in Abaqus CAE kernel:
-
-```python
-os.chdir('C:\\Users\\cmb247\\repos\\Abaqus\\DCM_Scripting')
-
-MODEL_NAME    = 'N01-015_2026-02-09-scripting'
-INSTANCE_NAME = 'PART-1_1-1'
-INP_FILE      = 'D:\\path\\to\\Job-N01-015-TEMPLATE_2STEP.inp'
-
-# Option 1 - Single site (manual PEAK_FIELD_VALUE, no scaling or overlap detection)
-PEAK_FIELD_VALUE = 0.5
-CENTER_POINT = (x, y, z)
-UPPER_POINT  = (x, y, z)
-LOWER_POINT  = (x, y, z)
-execfile('sets_scaled_inpmod_overlap.py')
-
-# Option 2 - Multiple sites from CSV (scaling + overlap detection applied automatically)
-PEAK_FIELD_VALUE = 0.3    # desired preload at reference site; all others scale from this (default)
-COORDS_FILE = 'coordinates_scaled.csv'
-execfile('sets_scaled_inpmod_overlap.py')
-```
-
-CSV format (`coordinates_scaled.csv`):
+`coordinates_scaled.csv`:
 ```
 site_name,center_x,center_y,center_z,upper_x,upper_y,upper_z,lower_x,lower_y,lower_z,upper_cord_sag_dist,indent_cord_sag_dist
 Site1,0.0,0.0,0.0,0.0,0.0,10.0,0.0,0.0,-10.0,6.82259,4.24591
@@ -327,7 +187,7 @@ For each band, the script creates:
 
 Naming convention: `predefinedfield-<site_index>-fieldband<band_number>`
 
-`sets_scaled_inpmod_gm_script.py` and `sets_scaled_inpmod_overlap.py` both write a `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See the [Output files](#output-files) section above for naming details.
+The script also writes an `_overlap_summary.txt` file alongside the `.inp` output, documenting the run configuration, overlap resolution results, and per-site band summaries. See [Output files](#output-files) above for naming details.
 
 ---
 
@@ -399,9 +259,14 @@ Post-processing pipeline for extracting maximum principal strain (MPS) and volum
 
   Also auto-updates `id_map.csv`: after writing, it finds the row whose `odb_path` matches the `ODB_PATH` you set and fills in `csv_path` — no manual copy-paste needed. If no matching row exists yet, it prints a warning instead of failing.
 
-- **mps_common.py** — archived (`archive/`). Was a shared-helpers module (`volume_weighted_percentile`, `pct_volume_above`, `PLOT_STYLE`) imported only by the now-archived analysis scripts; `DCM_main.py` has its own inlined copies of the same helpers.
+- **Alex_results_extraction_GM_WM.py** — same extraction, split by tissue type (GM/WM), for the grey/white-matter boundary enrichment analysis. Writes `<basename>_mps_GM_WM.csv`.
 
-- **Alex_results_plotting.py**, **"Alex_results_multipatient_plot - compare_threshold.py"**, **plot_gm_wm_boundary_enrichment.py**, **plot_preload_effect.py**, **plot_oscillation_effect.py** — archived (`archive/`). Their analyses are now covered by `DCM_main.py`, which is the current entry point for all results analysis (see its own docstring/stage headers for what each stage reproduces). Kept for reference only; not part of the live workflow.
+- **Alex_results_extraction_IVD.py** — same extraction, restricted to the IVD (intervertebral disc) set, for IVD strain analysis. Writes `<basename>_ivd_mps.csv`.
+
+- **DCM_main.py** (Python 3) — the single entry point for all results analysis. Reads `id_map.csv` directly and runs three sequential stages, each writing its own results folder (plots, `summary_*.md` write-ups, and `cache/`/`diagnostic_plots/` subfolders):
+  - **Stage 1** (`preopnopreloadvspostop_results/`) — PreOp (no preload) vs PostOp: % cord volume above threshold, blob-size distribution, whole-cord and GM/WM linear mixed-effects models, IVD strain by fusion status.
+  - **Stage 2** (`preop_results/`) — PreOp (with preload): blob-size distribution, GM/WM linear mixed-effects models, preload-effect comparison.
+  - **Stage 3** (`oscillation_results/`) — Oscillation: cumulative-vs-at-peak and delta-vs-baseline comparisons, oscillation-vs-no-oscillation linear mixed-effects model.
 
 ### `id_map.csv`
 
@@ -413,12 +278,12 @@ Gitignored — maps an anonymized participant number to the real patient ID and 
 | `id` | Real patient/hospital ID — never leaves this file |
 | `mJOA` | Pre-operative mJOA score |
 | `loading_condition` | `Flexion` or `Extension` |
-| `State` | `PreOp` or `PostOp` |
+| `State` | `PreOp`, `PreOp-NoPreload`, or `PostOp` |
 | `odb_path` | Full path to the job's `.odb` |
 | `csv_path` | Full path to the `_mps.csv` (auto-filled by `Alex_results_extraction.py`) |
-| `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx` | Logged by the archived `Alex_results_plotting.py` diagnostic |
+| `peak_frame_t95`, `peak_frame_t99`, `last_frame_idx` | Per-patient frame diagnostics (which frame strain-exceedance peaks at) |
 
-**Anonymization boundary:** `id_map.csv` and the raw per-frame `_mps.csv`/`_topology.csv` files (which live next to the `.odb`, typically on `D:\`, outside the repo) are never committed. Only the aggregated summary CSVs and plots produced by the multipatient script — keyed solely by `P{n}` — are safe to commit.
+**Anonymization boundary:** `id_map.csv` and the raw per-frame `_mps.csv`/`_topology.csv` files (which live next to the `.odb`, typically on `D:\`, outside the repo) are never committed. Only the aggregated summary CSVs and plots keyed solely by `P{n}` are safe to commit.
 
 ### Usage
 
@@ -433,10 +298,43 @@ Gitignored — maps an anonymized participant number to the real patient ID and 
 
 ### Output plots
 
-See the stage result folders (`preopnopreloadvspostop_results/`, `preop_results/`, `oscillation_results/`) produced by `DCM_main.py` — each contains its own plots, `summary_*.md` write-ups, and `cache/`/`diagnostic_plots/` subfolders. The older flat `multipatient_mps_plot_*.pdf`/`.csv` naming from the archived scripts is no longer produced.
+See the stage result folders (`preopnopreloadvspostop_results/`, `preop_results/`, `oscillation_results/`) produced by `DCM_main.py` — each contains its own plots, `summary_*.md` write-ups, and `cache/`/`diagnostic_plots/` subfolders.
 
 ### Methodology notes
 
 - **Volume-weighted, not element-count-weighted**: percentiles and thresholds are always computed by volume, so a coarse-meshed region can't be outvoted by a fine-meshed one just because it has more elements.
 - **Blob clustering**: elements exceeding a threshold are grouped into connected components using face-sharing adjacency between elements (approximated as **≥4 shared nodes** — exact for this mesh since it's all `C3D8` hex elements, but not a formal face check against each element's specific face-node groups). Each blob's volume is converted to an effective radius via `r = (3V / 4π)^(1/3)` (equivalent-sphere radius). Cumulative distributions are drawn as step functions (`drawstyle='steps-post'`), not diagonally-interpolated lines, since nothing actually accumulates between one blob's size and the next.
-- **FRAME_MODE**: `'last'` uses each element's MPS at the final frame; `'peak'` uses its max-ever MPS across all frames. Strain can spike mid-simulation and relax by the end, in which case `'last'` would underestimate true exposure — this is why the single-patient diagnostic exists.
+- **FRAME_MODE**: `'last'` uses each element's MPS at the final frame; `'peak'` uses its max-ever MPS across all frames. Strain can spike mid-simulation and relax by the end, in which case `'last'` would underestimate true exposure.
+
+---
+
+## Results Re-extraction Pipeline
+
+When raw ODB data changes (new job run, or a job re-extracted), the pipeline is:
+
+**1. Re-extract** (Abaqus kernel, per changed job):
+```python
+execfile('Alex_results_extraction.py')        # _mps.csv, _topology.csv, updates id_map.csv csv_path
+execfile('Alex_results_extraction_GM_WM.py')  # _mps_GM_WM.csv
+execfile('Alex_results_extraction_IVD.py')    # _ivd_mps.csv
+```
+
+**2. Delete stale caches** — `DCM_main.py` trusts a cache file's existence and won't detect that the underlying `_mps.csv` changed underneath it:
+
+| Cache | Location |
+|---|---|
+| `cache_prepost_sortedbymjoachange_peak.csv` | `preopnopreloadvspostop_results/cache/` |
+| `cache_prepost_blob_adjacency_peak.csv` | `preopnopreloadvspostop_results/cache/` |
+| `cache_ivd_prepost_peak.csv` | `preopnopreloadvspostop_results/cache/` |
+| `cache_gm_wm_boundary_preop_nopreload.csv` | `preopnopreloadvspostop_results/cache/` |
+| `cache_gm_wm_boundary_postop.csv` | `preopnopreloadvspostop_results/cache/` |
+| `cache_gm_wm_boundary_preop.csv` | `preop_results/cache/` |
+| `cache_oscillation_cumulative_vs_peak.csv` | `oscillation_results/cache/` |
+
+Only the caches touching the changed patient/state need deleting — if unsure, delete all 7; they rebuild automatically.
+
+**3. Run:**
+```python
+execfile('DCM_main.py')
+```
+One script, all 3 stages — rebuilds any missing cache from the raw `_mps.csv`/`_topology.csv`/`_ivd_mps.csv`/`_mps_GM_WM.csv` files, then regenerates every plot/summary/`.md`.
