@@ -302,7 +302,13 @@ See the stage result folders (`preopnopreloadvspostop_results/`, `preop_results/
 
 ### Methodology notes
 
-- **Volume-weighted, not element-count-weighted**: percentiles and thresholds are always computed by volume, so a coarse-meshed region can't be outvoted by a fine-meshed one just because it has more elements.
+- **Volume-weighted, not element-count-weighted**: percentiles and thresholds are always computed by volume, so a coarse-meshed region can't be outvoted by a fine-meshed one just because it has more elements. Two functions implement this:
+  - `pct_volume_above(df, threshold)` — % of cord (or IVD) volume with MPS at or above a **fixed** threshold. Used for the whole-cord/GM-WM comparisons (e.g. `MID_THRESHOLD = 0.015`) and the blob-size distributions (`DELTA_THRESHOLDS`, `PPBLOB_THRESHOLDS`).
+  - `volume_weighted_percentile(df, p=0.95)` — the inverse: the MPS value below which fraction `p` of total volume lies (e.g. T95 = 95th volume-weighted percentile). Used for the IVD analysis (Part D) to derive per-threshold cutoffs (`IVD_PERCENTILES`), both cohort-pooled (`IVD_COHORT_THRESHOLDS`, one shared cutoff across all patients) and patientwise (`IVD_PATIENT_THRESHOLDS`, one cutoff per patient).
+
+  Both weight by element volume rather than element count for the same reason, and the practice follows volume-weighted strain measures used in brain injury biomechanics (e.g. CSDM-style cumulative strain damage measures), as evaluated in:
+
+  > Kleiven, S. (2007). Predictors for traumatic brain injuries evaluated through accident reconstructions. *Stapp Car Crash Journal*, 51, 81-114. SAE 2007-22-0003. PMID: 18278592.
 - **Blob clustering**: elements exceeding a threshold are grouped into connected components using face-sharing adjacency between elements (approximated as **≥4 shared nodes** — exact for this mesh since it's all `C3D8` hex elements, but not a formal face check against each element's specific face-node groups). Each blob's volume is converted to an effective radius via `r = (3V / 4π)^(1/3)` (equivalent-sphere radius). Cumulative distributions are drawn as step functions (`drawstyle='steps-post'`), not diagonally-interpolated lines, since nothing actually accumulates between one blob's size and the next.
 - **FRAME_MODE**: `'last'` uses each element's MPS at the final frame; `'peak'` uses its max-ever MPS across all frames. Strain can spike mid-simulation and relax by the end, in which case `'last'` would underestimate true exposure.
 
