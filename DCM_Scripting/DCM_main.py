@@ -2334,7 +2334,7 @@ for gmvswm_threshold_name, gmvswm_threshold_val in (('t0p10', 0.10), ('t0p15', 0
         f.write(summary_md_preop)
     print("")
     print("Summary saved: {}".format(summary_md_preop_path))
-    sys.exit()
+    # sys.exit()
 # Combined QQ grid across both thresholds (rows = threshold, cols = condition).
 gmvswm_qq_entries_stage2 = []
 for gmvswm_threshold_name, gmvswm_threshold_label in (('t0p10', 'Threshold 0.10'), ('t0p15', 'Threshold 0.15')):
