@@ -1517,13 +1517,17 @@ def _fit_one_condition_tissue_model(elements_df, condition, threshold):
             qq_theoretical, qq_sample, qq_slope, qq_intercept)
 
 
-def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None):
+def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None, extension_bracket_frac=0.3):
     """Fits GM vs WM completely separately for Flexion and Extension. Saves
     a 2-panel boxplot (Flexion left, Extension right, shared y-axis, with
     spaghetti lines connecting each patient's GM/WM pair). Residual QQ plots
     are NOT drawn here - the caller combines them across states into one
     grid (see save_gmvswm_qq_grid). Returns (markdown_section, results) -
-    results carries 'resid'/'shapiro' per condition for that combined grid."""
+    results carries 'resid'/'shapiro' per condition for that combined grid.
+
+    extension_bracket_frac: Extension's significance bracket as a fraction
+    of ymax (Flexion's stays fixed at 65/70) - different calls' data can sit
+    at different heights relative to ymax, so this is per-call, not global."""
     results = {}
     for condition in ('Flexion', 'Extension'):
         (df, gm_mean, wm_mean, p_val, coef_df, varcorr_df, sw_stat, sw_p,
@@ -1567,7 +1571,7 @@ def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None
                    edgecolor='black', linewidth=1.5, zorder=5)
 
         p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
-        bracket_y = 0.3 * ymax if condition == 'Extension' else (65 / 70) * ymax
+        bracket_y = extension_bracket_frac * ymax if condition == 'Extension' else (65 / 70) * ymax
         tick = (1.5 / 70) * ymax
         ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
                 color='black', linewidth=1.2, zorder=6)
@@ -1586,7 +1590,6 @@ def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None
                markeredgecolor=NAVY, alpha=0.7, label='Flexion'),
         Line2D([0], [0], marker=CONDITION_MARKERS['extension'], linestyle='', markerfacecolor=NAVY,
                markeredgecolor=NAVY, alpha=0.7, label='Extension'),
-        
     ]
     axes[1].legend(handles=legend_handles, loc='upper right', frameon=False)
     fig.suptitle('{}: Grey Matter vs. White Matter'.format(title_prefix))
@@ -1595,7 +1598,7 @@ def run_gmvswm_lmm(elements_df, tag, title_prefix, threshold, out_dir, ymax=None
     fig.savefig(box_path, bbox_inches='tight')
     plt.close(fig)
     print("  Plot saved: {}".format(box_path))
-    sys.exit()
+    
     sections = []
     for condition in ('Flexion', 'Extension'):
         r = results[condition]
@@ -2101,54 +2104,97 @@ print("=" * 70)
 # ============================================================
 MANUAL_THRESHOLDS = {'t0p05': 0.05, 't0p10': 0.10, 't0p15': 0.15, 't0p20': 0.20}
 
-s2blob_per_patient = {}   # (participant, loading_condition) -> reduced DataFrame, PreOp (with preload) only
-s2blob_missing = []
-for _, s2blob_row in id_map.iterrows():
-    if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
-        continue
-    s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
-    if s2blob_condition.strip().lower() not in ('flexion', 'extension'):
-        continue
-    s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
-    if not s2blob_csv_path or s2blob_csv_path.lower() == 'nan' or not os.path.isfile(s2blob_csv_path):
-        s2blob_missing.append(s2blob_row)
-        continue
-    s2blob_raw = pd.read_csv(s2blob_csv_path)
-    s2blob_per_patient[(int(s2blob_row['participant']), s2blob_condition)] = reduce_to_frame_mode(
-        s2blob_raw, FRAME_MODE)
+# --- mps/volume cache: build if missing, else read ---
+s2blob_mps_cache_path = os.path.join(STAGE2_CACHE_DIR, 'cache_preop_withpreload_mps_{}.csv'.format(FRAME_MODE))
+if os.path.isfile(s2blob_mps_cache_path):
+    s2blob_mps_cache_df = pd.read_csv(s2blob_mps_cache_path)
+else:
+    print("No PreOp (with preload) mps/volume cache found - building it from raw per-frame CSVs (slow, one-time)...")
+    _s2blob_mps_rows = []
+    _s2blob_missing = []
+    for _, s2blob_row in id_map.iterrows():
+        if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
+            continue
+        s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
+        if s2blob_condition.strip().lower() not in ('flexion', 'extension'):
+            continue
+        s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
+        if not s2blob_csv_path or s2blob_csv_path.lower() == 'nan' or not os.path.isfile(s2blob_csv_path):
+            _s2blob_missing.append(s2blob_row)
+            continue
+        s2blob_raw = pd.read_csv(s2blob_csv_path)
+        s2blob_reduced = reduce_to_frame_mode(s2blob_raw, FRAME_MODE).copy()
+        s2blob_reduced.insert(0, 'loading_condition', s2blob_condition)
+        s2blob_reduced.insert(0, 'participant', int(s2blob_row['participant']))
+        _s2blob_mps_rows.append(s2blob_reduced)
 
-if s2blob_missing:
-    print("Skipping {} row(s) with no csv_path set in id_map.csv (or file not found):".format(len(s2blob_missing)))
-    for s2blob_row in s2blob_missing:
-        print("  P{} ({})".format(int(s2blob_row['participant']),
-                                   str(s2blob_row.get('loading_condition', '')).strip() or '?'))
+    if _s2blob_missing:
+        print("Skipping {} row(s) with no csv_path set in id_map.csv (or file not found):".format(
+            len(_s2blob_missing)))
+        for s2blob_row in _s2blob_missing:
+            print("  P{} ({})".format(int(s2blob_row['participant']),
+                                       str(s2blob_row.get('loading_condition', '')).strip() or '?'))
+
+    if not _s2blob_mps_rows:
+        raise SystemExit("No PreOp (with preload) patient data loaded - fill in csv_path in id_map.csv first.")
+
+    s2blob_mps_cache_df = pd.concat(_s2blob_mps_rows, ignore_index=True)
+    s2blob_mps_cache_df.to_csv(s2blob_mps_cache_path, index=False)
+    print("Cached PreOp (with preload) mps/volume data: {}".format(s2blob_mps_cache_path))
+
+s2blob_per_patient = {   # (participant, loading_condition) -> reduced DataFrame, PreOp (with preload) only
+    (int(p), c): grp[['element_label', 'mps', 'volume']].reset_index(drop=True)
+    for (p, c), grp in s2blob_mps_cache_df.groupby(['participant', 'loading_condition'])
+}
 
 if not s2blob_per_patient:
     raise SystemExit("No PreOp (with preload) patient data loaded - fill in csv_path in id_map.csv first.")
 
-# Blob adjacency cache, PreOp (with preload) only
-s2blob_adjacency_cache = {}
-s2blob_missing_topology = []
-for _, s2blob_row in id_map.iterrows():
-    if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
-        continue
-    s2blob_participant = int(s2blob_row['participant'])
-    s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
-    s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
-    s2blob_key = (s2blob_participant, s2blob_condition)
-    if s2blob_key not in s2blob_per_patient or not s2blob_csv_path or s2blob_csv_path.lower() == 'nan':
-        continue
-    s2blob_topology_path = s2blob_csv_path.replace('_mps.csv', '_topology.csv')
-    if not os.path.isfile(s2blob_topology_path):
-        s2blob_missing_topology.append(s2blob_key)
-        continue
-    s2blob_adjacency_cache[s2blob_key] = load_adjacency_edges(s2blob_topology_path)
+# --- blob adjacency cache: build if missing, else read ---
+s2blob_adjacency_cache_path = os.path.join(
+    STAGE2_CACHE_DIR, 'cache_preop_withpreload_blob_adjacency_{}.csv'.format(FRAME_MODE))
+if os.path.isfile(s2blob_adjacency_cache_path):
+    s2blob_adjacency_df = pd.read_csv(s2blob_adjacency_cache_path)
+else:
+    print("No PreOp (with preload) blob adjacency cache found - building it from '_topology.csv' files "
+          "(slow, one-time)...")
+    _s2blob_adjacency_rows = []
+    _s2blob_missing_topology = []
+    for _, s2blob_row in id_map.iterrows():
+        if str(s2blob_row.get('State', '')).strip().lower() != 'preop':
+            continue
+        s2blob_participant = int(s2blob_row['participant'])
+        s2blob_condition = str(s2blob_row.get('loading_condition', '')).strip()
+        s2blob_csv_path = str(s2blob_row.get('csv_path', '')).strip()
+        s2blob_key = (s2blob_participant, s2blob_condition)
+        if s2blob_key not in s2blob_per_patient or not s2blob_csv_path or s2blob_csv_path.lower() == 'nan':
+            continue
+        s2blob_topology_path = s2blob_csv_path.replace('_mps.csv', '_topology.csv')
+        if not os.path.isfile(s2blob_topology_path):
+            _s2blob_missing_topology.append(s2blob_key)
+            continue
+        for s2blob_elem_a, s2blob_elem_b in load_adjacency_edges(s2blob_topology_path):
+            _s2blob_adjacency_rows.append({
+                'participant':       s2blob_participant,
+                'loading_condition': s2blob_condition,
+                'elem_a':            s2blob_elem_a,
+                'elem_b':            s2blob_elem_b,
+            })
 
-if s2blob_missing_topology:
-    print("Skipping {} patient/condition(s) missing '_topology.csv' for blob analysis:".format(
-        len(s2blob_missing_topology)))
-    for s2blob_participant, s2blob_condition in s2blob_missing_topology:
-        print("  P{} ({})".format(s2blob_participant, s2blob_condition))
+    if _s2blob_missing_topology:
+        print("Skipping {} patient/condition(s) missing '_topology.csv' for blob analysis:".format(
+            len(_s2blob_missing_topology)))
+        for s2blob_participant, s2blob_condition in _s2blob_missing_topology:
+            print("  P{} ({})".format(s2blob_participant, s2blob_condition))
+
+    s2blob_adjacency_df = pd.DataFrame(_s2blob_adjacency_rows)
+    s2blob_adjacency_df.to_csv(s2blob_adjacency_cache_path, index=False)
+    print("Cached PreOp (with preload) blob adjacency edges: {}".format(s2blob_adjacency_cache_path))
+
+s2blob_adjacency_cache = {
+    (int(p), c): list(zip(grp['elem_a'], grp['elem_b']))
+    for (p, c), grp in s2blob_adjacency_df.groupby(['participant', 'loading_condition'])
+}
 
 # For each (threshold, condition), pool blobs from every patient with adjacency data
 s2blob_records = []
@@ -2274,7 +2320,8 @@ for gmvswm_threshold_name, gmvswm_threshold_val in (('t0p10', 0.10), ('t0p15', 0
     gmvswm_section_preop, gmvswm_results_preop = run_gmvswm_lmm(
         preop_elements, 'preop_{}'.format(gmvswm_threshold_name),
         'PreOp with Preload (threshold={:g})'.format(gmvswm_threshold_val),
-        threshold=gmvswm_threshold_val, out_dir=STAGE2_RESULTS_DIR)
+        threshold=gmvswm_threshold_val, out_dir=STAGE2_RESULTS_DIR,
+        extension_bracket_frac=0.6 if gmvswm_threshold_name == 't0p10' else 0.3)
     gmvswm_results_preop_by_threshold[gmvswm_threshold_name] = gmvswm_results_preop
 
     summary_md_preop = (
@@ -2287,7 +2334,7 @@ for gmvswm_threshold_name, gmvswm_threshold_val in (('t0p10', 0.10), ('t0p15', 0
         f.write(summary_md_preop)
     print("")
     print("Summary saved: {}".format(summary_md_preop_path))
-
+    sys.exit()
 # Combined QQ grid across both thresholds (rows = threshold, cols = condition).
 gmvswm_qq_entries_stage2 = []
 for gmvswm_threshold_name, gmvswm_threshold_label in (('t0p10', 'Threshold 0.10'), ('t0p15', 'Threshold 0.15')):
