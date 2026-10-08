@@ -11,6 +11,7 @@ Run: python DCM_main.py (first run is slow - builds caches from raw data).
 
 import math
 import os
+import sys
 from collections import defaultdict
 
 # Fixes a reproducibility quirk: matplotlib writes its PDF backend's
@@ -804,10 +805,9 @@ print("=" * 70)
 # ============================================================
 # Linear mixed-effects tests (R's lme4/lmerTest via rpy2 - Kenward-Roger-
 # corrected t-tests, not Satterthwaite or the asymptotic z-tests statsmodels
-# gives - N=12 patients is small enough that KR's bias correction to the
-# fixed-effect covariance matrix matters). Patient is a random intercept.
-# Imported here (rather than at module top) so Parts A and B above complete
-# and save their output even if R/rpy2 isn't set up.
+# gives - N=12 patients is small enough that the bias correction applied to the
+# fixed-effect covariance matrix in KR could be important). 
+# Patient is a random intercept.
 # ============================================================
 os.environ.setdefault('R_HOME', r'C:\Program Files\R\R-4.6.1')
 os.environ.setdefault('R_LIBS_USER', os.path.join(os.path.expanduser('~'), 'Documents', 'R', 'win-library', '4.6'))
@@ -1053,11 +1053,12 @@ def run_wholecord_state(df, tag, threshold, ymax=None):
         ax.scatter([1] * len(post_vals), post_vals.values, color=NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
         ax.scatter([0, 1], [r['pre_mean'], r['post_mean']], marker='d', s=80, facecolor='red',
                    edgecolor='black', linewidth=1.5, zorder=5)
-        for patient_id, row in wide.iterrows():
-            ax.text(1.06, row['PostOp'], patient_id, fontsize=6, va='center', ha='left', color=NAVY, zorder=4)
+        # for patient_id, row in wide.iterrows():
+        #     ax.text(1.06, row['PostOp'], patient_id, fontsize=6, va='center', ha='left', color=NAVY, zorder=4)
 
         p_label = 'p < 0.001' if r['p'] < 0.001 else 'p = {:.3f}'.format(r['p'])
-        bracket_y, tick = (58 / 70) * ymax, (1.5 / 70) * ymax
+        bracket_y = 0.35 * ymax if condition == 'Extension' else (65 / 70) * ymax
+        tick = (1.5 / 70) * ymax
         ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
                 color='black', linewidth=1.2, zorder=6)
         ax.text(0.5, bracket_y + (1 / 70) * ymax, p_label, ha='center', va='bottom', fontsize=10)
@@ -1065,20 +1066,30 @@ def run_wholecord_state(df, tag, threshold, ymax=None):
         ax.set_xticks([0, 1])
         ax.set_xticklabels(['PreOp\n(no preload)', 'PostOp'])
         model_label = 'LMM' if r['model_kind'] == 'lmm' else 'paired t-test'
-        ax.set_xlabel('{}\nn={} ({})'.format(condition, r['df']['patient'].nunique(), model_label))
-        ax.set_ylim(0, ymax)
+        # ax.set_xlabel('{}\nn={} ({})'.format(condition, r['df']['patient'].nunique(), model_label))
+        ax.set_xlabel('{}'.format(condition))
+        ax.set_ylim(0-(0.05*ymax), ymax*1.1)
         ax.set_xlim(-0.5, 1.3)
 
     axes[0].set_ylabel('% of whole cord volume above threshold ({:g})'.format(threshold))
-    mean_handle = [Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
-                           label='Mean / estimate')]
-    axes[0].legend(handles=mean_handle, loc='upper left', frameon=False)
+    legend_handles = [
+        Line2D([0], [0], marker='d', linestyle='', markerfacecolor='red', markeredgecolor='black',
+                       label='Model Prediction'),
+        Line2D([0], [0], marker=CONDITION_MARKERS['flexion'], linestyle='', markerfacecolor=NAVY,
+               markeredgecolor=NAVY, alpha=0.7, label='Flexion'),
+        Line2D([0], [0], marker=CONDITION_MARKERS['extension'], linestyle='', markerfacecolor=NAVY,
+               markeredgecolor=NAVY, alpha=0.7, label='Extension'),
+        
+    ]
+    axes[1].legend(handles=legend_handles, loc='upper right', frameon=False)
     fig.suptitle('Whole Cord: PreOp (no preload) vs PostOp')
     fig.tight_layout()
     box_path = os.path.join(OUT_DIR, 'wholecord_state_boxplot_{}.pdf'.format(tag))
     fig.savefig(box_path, bbox_inches='tight')
     plt.close(fig)
     print("  Plot saved: {}".format(box_path))
+
+    sys.exit()
 
     sections = []
     for condition in ('Flexion', 'Extension'):
