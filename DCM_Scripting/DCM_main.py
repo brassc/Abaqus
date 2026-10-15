@@ -85,6 +85,13 @@ OUT_DIR = RESULTS_DIR   # kept as OUT_DIR below so the ported blocks are unchang
 # Must match the FRAME_MODE the caches were generated with (selects the cache files).
 FRAME_MODE = 'peak'
 
+# Ordering-dependent plots (Stage 1 Part A / combined delta / IVD, Stage 3
+# cumulative-vs-peak) are functions taking mcid=False. Each is always called
+# once with the original delta-mJOA ordering (filenames unchanged); when
+# PRODUCE_MCID is True it is called a second time with mcid=True, ordering
+# by delta mJOA minus expected MCID and writing '..._sortedbymcid' files.
+PRODUCE_MCID = True
+
 DELTA_THRESHOLDS = {'t0p01': 0.01, 't0p015': 0.015, 't0p02': 0.02, 't0p025': 0.025}
 DELTA_THRESHOLD_COLORS = {
     't0p01': '#2a78d6',   # blue
@@ -212,8 +219,39 @@ for p_label, preop_val in preop_mjoa_by_participant.items():
     except (TypeError, ValueError):
         continue
 
-delta_participants = sorted(mjoa_delta_by_participant.keys(),
-                             key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+def mcid_for_preop_mjoa(preop_mjoa):
+    """Expected MCID (mJOA points) from baseline severity. mJOA is integer;
+    18 has no defined band and is treated as mild."""
+    if preop_mjoa >= 15:
+        return 1
+    if preop_mjoa >= 12:
+        return 2
+    return 3
+
+
+# Adjusted response = delta mJOA - expected MCID (>= 0: MCID achieved).
+mjoa_mcid_adjusted_by_participant = {
+    p: mjoa_delta_by_participant[p] - mcid_for_preop_mjoa(float(preop_mjoa_by_participant[p]))
+    for p in mjoa_delta_by_participant}
+
+def _ordering(mcid=False):
+    """(score dict, axis label, x label, filename tag) for the requested ordering."""
+    if mcid:
+        return (mjoa_mcid_adjusted_by_participant,
+                'Δ mJOA − MCID',
+                'Participant (ordered by Δ mJOA − expected MCID, ascending)',
+                'sortedbymcid')
+    return (mjoa_delta_by_participant,
+            'Δ mJOA',
+            'Participant (ordered by change in mJOA, postop - preop, ascending)',
+            'sortedbymjoachange')
+
+
+# Module-level defaults = original delta-mJOA ordering.
+order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(False)
+
+delta_participants = sorted(order_score_by_participant.keys(),
+                             key=lambda p: (order_score_by_participant[p], int(p[1:])))
 delta_x_pos = {p: i for i, p in enumerate(delta_participants)}
 
 # ============================================================
@@ -311,73 +349,82 @@ for (delta_participant, delta_condition, delta_state), delta_df in sorted(state_
         })
 delta_summary = pd.DataFrame(delta_records)
 
-delta_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_prepost_sortedbymjoachange.csv')
-delta_summary.to_csv(delta_summary_path, index=False)
-print(delta_summary.to_string(index=False))
+def plot_prepost_by_order(mcid=False):
+    order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(mcid)
+    delta_participants = sorted(order_score_by_participant.keys(),
+                                key=lambda p: (order_score_by_participant[p], int(p[1:])))
+    delta_x_pos = {p: i for i, p in enumerate(delta_participants)}
+    delta_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_prepost_{}.csv'.format(ORDER_FILE_TAG))
+    delta_summary.to_csv(delta_summary_path, index=False)
+    print(delta_summary.to_string(index=False))
 
-# Common y-limits across BOTH rows, so PreOp and PostOp are directly
-# comparable at a glance instead of each auto-scaling to its own data range.
-delta_y_max = delta_summary['pct_above'].max()
-delta_ylim = (0, delta_y_max * 1.1 if delta_y_max > 0 else 1)
+    # Common y-limits across BOTH rows, so PreOp and PostOp are directly
+    # comparable at a glance instead of each auto-scaling to its own data range.
+    delta_y_max = delta_summary['pct_above'].max()
+    delta_ylim = (0, delta_y_max * 1.1 if delta_y_max > 0 else 1)
 
-delta_fig, (delta_ax_preop, delta_ax_postop) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
-delta_ax_by_state = {DELTA_TOP_STATE: delta_ax_preop, DELTA_BOTTOM_STATE: delta_ax_postop}
+    delta_fig, (delta_ax_preop, delta_ax_postop) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+    delta_ax_by_state = {DELTA_TOP_STATE: delta_ax_preop, DELTA_BOTTOM_STATE: delta_ax_postop}
 
-for delta_state_name, delta_ax in delta_ax_by_state.items():
-    delta_state_sub = delta_summary[delta_summary['state'].astype(str).str.strip().str.lower() == delta_state_name]
-    for delta_threshold_name in DELTA_THRESHOLDS:
-        delta_sub = delta_state_sub[delta_state_sub['threshold'] == delta_threshold_name]
-        delta_color = DELTA_THRESHOLD_COLORS[delta_threshold_name]
-        for delta_participant_label, grp in delta_sub.groupby('participant'):
-            if len(grp) == 2:
-                xp = delta_x_pos[delta_participant_label]
-                delta_ax.vlines(xp, grp['pct_above'].min(), grp['pct_above'].max(),
-                                 color=delta_color, linewidth=1.0, alpha=0.5, zorder=2)
-        for delta_condition_name, grp in delta_sub.groupby('loading_condition'):
-            marker = CONDITION_MARKERS.get(delta_condition_name.strip().lower(), 'o')
-            xs = [delta_x_pos[p] for p in grp['participant']]
-            delta_ax.scatter(xs, grp['pct_above'], color=delta_color, marker=marker, s=55, zorder=3)
-    if delta_state_name == DELTA_BOTTOM_STATE:
-        for delta_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
-            if delta_fusion_p in delta_x_pos:
-                xp = delta_x_pos[delta_fusion_p]
-                delta_ax.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
-    delta_ax.set_ylim(delta_ylim)
-    delta_ax.set_ylabel('% cord volume\nabove threshold')
-    delta_ax.set_title(DELTA_STATE_TITLES[delta_state_name])
+    for delta_state_name, delta_ax in delta_ax_by_state.items():
+        delta_state_sub = delta_summary[delta_summary['state'].astype(str).str.strip().str.lower() == delta_state_name]
+        for delta_threshold_name in DELTA_THRESHOLDS:
+            delta_sub = delta_state_sub[delta_state_sub['threshold'] == delta_threshold_name]
+            delta_color = DELTA_THRESHOLD_COLORS[delta_threshold_name]
+            for delta_participant_label, grp in delta_sub.groupby('participant'):
+                if len(grp) == 2:
+                    xp = delta_x_pos[delta_participant_label]
+                    delta_ax.vlines(xp, grp['pct_above'].min(), grp['pct_above'].max(),
+                                     color=delta_color, linewidth=1.0, alpha=0.5, zorder=2)
+            for delta_condition_name, grp in delta_sub.groupby('loading_condition'):
+                marker = CONDITION_MARKERS.get(delta_condition_name.strip().lower(), 'o')
+                xs = [delta_x_pos[p] for p in grp['participant']]
+                delta_ax.scatter(xs, grp['pct_above'], color=delta_color, marker=marker, s=55, zorder=3)
+        if delta_state_name == DELTA_BOTTOM_STATE:
+            for delta_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+                if delta_fusion_p in delta_x_pos:
+                    xp = delta_x_pos[delta_fusion_p]
+                    delta_ax.axvspan(xp - 0.5, xp + 0.5, color='orange', alpha=0.2, zorder=0)
+        delta_ax.set_ylim(delta_ylim)
+        delta_ax.set_ylabel('% cord volume\nabove threshold')
+        delta_ax.set_title(DELTA_STATE_TITLES[delta_state_name])
 
-delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
-                                   label='{:g}'.format(val))
-                            for name, val in DELTA_THRESHOLDS.items()]
-delta_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
-                            for cond, marker in CONDITION_MARKERS.items()]
-delta_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion (PostOp)')]
-delta_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
+    delta_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=DELTA_THRESHOLD_COLORS[name],
+                                       label='{:g}'.format(val))
+                                for name, val in DELTA_THRESHOLDS.items()]
+    delta_condition_handles = [Line2D([0], [0], marker=marker, linestyle='', color='black', label=cond.capitalize())
+                                for cond, marker in CONDITION_MARKERS.items()]
+    delta_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion (PostOp)')]
+    delta_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
 
-delta_all_handles = (
-    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + delta_threshold_handles +
-    [delta_blank_handle] +
-    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + delta_condition_handles +
-    [delta_blank_handle] + delta_fusion_handle
-)
-delta_fig.legend(handles=delta_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+    delta_all_handles = (
+        [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + delta_threshold_handles +
+        [delta_blank_handle] +
+        [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + delta_condition_handles +
+        [delta_blank_handle] + delta_fusion_handle
+    )
+    delta_fig.legend(handles=delta_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
-delta_ax_preop.tick_params(labelbottom=False)
-delta_ax_postop.set_xticks(range(len(delta_participants)))
-delta_ax_postop.set_xticklabels(
-    ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in delta_participants])
-delta_ax_postop.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                          xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-delta_ax_postop.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
-delta_fig.suptitle('% cord volume above MPS threshold, PreOp (no preload) vs PostOp')
-delta_fig.tight_layout()
+    delta_ax_preop.tick_params(labelbottom=False)
+    delta_ax_postop.set_xticks(range(len(delta_participants)))
+    delta_ax_postop.set_xticklabels(
+        ['{}\n({:+.0f})'.format(p, order_score_by_participant[p]) for p in delta_participants])
+    delta_ax_postop.annotate(ORDER_AXIS_LABEL, xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                              xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    delta_ax_postop.set_xlabel(ORDER_XLABEL)
+    delta_fig.suptitle('% cord volume above MPS threshold, PreOp (no preload) vs PostOp')
+    delta_fig.tight_layout()
 
-delta_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_prepost_sortedbymjoachange.pdf')
-delta_fig.savefig(delta_plot_path, bbox_inches='tight')
-plt.close(delta_fig)
+    delta_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_prepost_{}.pdf'.format(ORDER_FILE_TAG))
+    delta_fig.savefig(delta_plot_path, bbox_inches='tight')
+    plt.close(delta_fig)
 
-print("Summary saved: {}".format(delta_summary_path))
-print("Plot saved: {}".format(delta_plot_path))
+    print("Summary saved: {}".format(delta_summary_path))
+    print("Plot saved: {}".format(delta_plot_path))
+
+plot_prepost_by_order()
+if PRODUCE_MCID:
+    plot_prepost_by_order(mcid=True)
 
 # ============================================================
 # Second plot: delta (PostOp - PreOp no preload) % cord volume above
@@ -517,62 +564,69 @@ op_blank_handle = Line2D([0], [0], linestyle='none', marker='None', label='')
 # DELTA_THRESHOLDS/COLORS, CONDITION_MARKERS, DELTA_FUSION_PARTICIPANTS,
 # OUT_DIR, Line2D, Patch, pd, plt, os already loaded/defined above.
 # ============================================================
-op_combined_participants = sorted(mjoa_delta_by_participant.keys(),
-                                   key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
-op_combined_x_pos = {p: i for i, p in enumerate(op_combined_participants)}
+def plot_delta_by_operation_combined(mcid=False):
+    order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(mcid)
+    op_combined_participants = sorted(order_score_by_participant.keys(),
+                                       key=lambda p: (order_score_by_participant[p], int(p[1:])))
+    op_combined_x_pos = {p: i for i, p in enumerate(op_combined_participants)}
 
-op_combined_fig, op_combined_ax = plt.subplots(figsize=(9, 5.5))
+    op_combined_fig, op_combined_ax = plt.subplots(figsize=(9, 5.5))
 
-for op_threshold_name in DELTA_THRESHOLDS:
-    op_threshold_sub = op_delta_summary[op_delta_summary['threshold'] == op_threshold_name]
-    op_color = DELTA_THRESHOLD_COLORS[op_threshold_name]
-    for op_participant_label, op_grp in op_threshold_sub.groupby('participant'):
-        if len(op_grp) == 2:
-            op_xp = op_combined_x_pos[op_participant_label]
-            op_combined_ax.vlines(op_xp, op_grp['delta'].min(), op_grp['delta'].max(),
-                                   color=op_color, linewidth=1.0, alpha=0.5, zorder=2)
-    for op_condition_name, op_grp in op_threshold_sub.groupby('loading_condition'):
-        op_marker = CONDITION_MARKERS.get(op_condition_name.strip().lower(), 'o')
-        op_xs = [op_combined_x_pos[p] for p in op_grp['participant']]
-        op_combined_ax.scatter(op_xs, op_grp['delta'], color=op_color, marker=op_marker, s=55, zorder=3)
+    for op_threshold_name in DELTA_THRESHOLDS:
+        op_threshold_sub = op_delta_summary[op_delta_summary['threshold'] == op_threshold_name]
+        op_color = DELTA_THRESHOLD_COLORS[op_threshold_name]
+        for op_participant_label, op_grp in op_threshold_sub.groupby('participant'):
+            if len(op_grp) == 2:
+                op_xp = op_combined_x_pos[op_participant_label]
+                op_combined_ax.vlines(op_xp, op_grp['delta'].min(), op_grp['delta'].max(),
+                                       color=op_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for op_condition_name, op_grp in op_threshold_sub.groupby('loading_condition'):
+            op_marker = CONDITION_MARKERS.get(op_condition_name.strip().lower(), 'o')
+            op_xs = [op_combined_x_pos[p] for p in op_grp['participant']]
+            op_combined_ax.scatter(op_xs, op_grp['delta'], color=op_color, marker=op_marker, s=55, zorder=3)
 
-for op_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
-    if op_fusion_p in op_combined_x_pos:
-        op_xp = op_combined_x_pos[op_fusion_p]
-        op_combined_ax.axvspan(op_xp - 0.5, op_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+    for op_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+        if op_fusion_p in op_combined_x_pos:
+            op_xp = op_combined_x_pos[op_fusion_p]
+            op_combined_ax.axvspan(op_xp - 0.5, op_xp + 0.5, color='orange', alpha=0.2, zorder=0)
 
-op_combined_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
-op_combined_ax.set_ylim(op_delta_ylim)
-op_combined_ax.set_ylabel('Δ % cord volume above threshold\n(PostOp - PreOp)')
-op_combined_ax.set_xticks(range(len(op_combined_participants)))
-op_combined_ax.set_xticklabels(
-    ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in op_combined_participants])
-op_combined_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                         xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-op_combined_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
+    op_combined_ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, zorder=1)
+    op_combined_ax.set_ylim(op_delta_ylim)
+    op_combined_ax.set_ylabel('Δ % cord volume above threshold\n(PostOp - PreOp)')
+    op_combined_ax.set_xticks(range(len(op_combined_participants)))
+    op_combined_ax.set_xticklabels(
+        ['{}\n({:+.0f})'.format(p, order_score_by_participant[p]) for p in op_combined_participants])
+    op_combined_ax.annotate(ORDER_AXIS_LABEL, xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                             xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+    op_combined_ax.set_xlabel(ORDER_XLABEL)
 
-op_combined_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion')]
-op_combined_all_handles = (
-    [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + op_threshold_handles +
-    [op_blank_handle] +
-    [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + op_condition_handles +
-    [op_blank_handle] + op_combined_fusion_handle
-)
-op_combined_fig.legend(handles=op_combined_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+    op_combined_fusion_handle = [Patch(facecolor='orange', alpha=0.2, label='Fusion')]
+    op_combined_all_handles = (
+        [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + op_threshold_handles +
+        [op_blank_handle] +
+        [Line2D([0], [0], linestyle='none', marker='None', label='Loading condition')] + op_condition_handles +
+        [op_blank_handle] + op_combined_fusion_handle
+    )
+    op_combined_fig.legend(handles=op_combined_all_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
 
-op_combined_fig.suptitle('Δ % cord volume above MPS threshold (PostOp - PreOp no preload), by operation type')
-op_combined_fig.tight_layout()
+    op_combined_fig.suptitle('Δ % cord volume above MPS threshold (PostOp - PreOp no preload), by operation type')
+    op_combined_fig.tight_layout()
 
-op_combined_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_delta_by_operation_combined.pdf')
-op_combined_fig.savefig(op_combined_plot_path, bbox_inches='tight')
-plt.close(op_combined_fig)
+    op_combined_plot_path = os.path.join(OUT_DIR, 'multipatient_mps_plot_delta_by_operation_combined{}.pdf'.format(
+            '_sortedbymcid' if mcid else ''))
+    op_combined_fig.savefig(op_combined_plot_path, bbox_inches='tight')
+    plt.close(op_combined_fig)
 
-op_combined_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_delta_by_operation_combined.csv')
-op_delta_summary.to_csv(op_combined_summary_path, index=False)
+    op_combined_summary_path = os.path.join(OUT_DIR, 'multipatient_mps_summary_delta_by_operation_combined.csv')
+    op_delta_summary.to_csv(op_combined_summary_path, index=False)
 
-print()
-print("Summary saved: {}".format(op_combined_summary_path))
-print("Plot saved: {}".format(op_combined_plot_path))
+    print()
+    print("Summary saved: {}".format(op_combined_summary_path))
+    print("Plot saved: {}".format(op_combined_plot_path))
+
+plot_delta_by_operation_combined()
+if PRODUCE_MCID:
+    plot_delta_by_operation_combined(mcid=True)
 
 print("")
 print("=" * 70)
@@ -1842,13 +1896,14 @@ ivd_peak_summary = pd.DataFrame(ivd_peak_records)
 ivd_summary = ivd_summary[ivd_summary['participant'].isin(mjoa_delta_by_participant)]
 ivd_peak_summary = ivd_peak_summary[ivd_peak_summary['participant'].isin(mjoa_delta_by_participant)]
 
-ivd_summary_path = os.path.join(OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_sortedbymjoachange.csv')
+ivd_summary_path = os.path.join(
+    OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_{}.csv'.format(ORDER_FILE_TAG))
 ivd_summary.merge(ivd_peak_summary, on=['participant', 'loading_condition', 'state']).to_csv(
     ivd_summary_path, index=False)
 print(ivd_summary.to_string(index=False))
 
 ivd_participants = sorted(ivd_summary['participant'].unique(),
-                           key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+                           key=lambda p: (order_score_by_participant[p], int(p[1:])))
 ivd_x_pos = {p: i for i, p in enumerate(ivd_participants)}
 
 # ============================================================
@@ -1870,55 +1925,65 @@ ivd_all_handles = (
     [ivd_blank] + ivd_fusion_handle
 )
 
-ivd_plot_paths = []
-for ivd_name, ivd_p in IVD_PERCENTILES.items():
-    ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
-    ivd_col_df = ivd_summary[ivd_summary['percentile'] == ivd_name]
+def plot_ivd_by_order(mcid=False):
+    order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(mcid)
+    ivd_participants = sorted(ivd_summary['participant'].unique(),
+                              key=lambda p: (order_score_by_participant[p], int(p[1:])))
+    ivd_x_pos = {p: i for i, p in enumerate(ivd_participants)}
+    ivd_plot_paths = []
+    for ivd_name, ivd_p in IVD_PERCENTILES.items():
+        ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
+        ivd_col_df = ivd_summary[ivd_summary['percentile'] == ivd_name]
 
-    ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
+        ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
 
-    for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
-        for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
-            if len(ivd_state_grp) == 2:
-                ivd_xp = ivd_x_pos[ivd_participant_label]
-                ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
-                               color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
-    for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
-        ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
-        ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
-        ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
-        if ivd_filled:
-            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
-        else:
-            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
-                            marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
+        for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
+            for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
+                if len(ivd_state_grp) == 2:
+                    ivd_xp = ivd_x_pos[ivd_participant_label]
+                    ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
+                                   color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
+            ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
+            ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
+            ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
+            if ivd_filled:
+                ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
+            else:
+                ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
+                                marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
 
-    for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
-        if ivd_fusion_p in ivd_x_pos:
-            ivd_xp = ivd_x_pos[ivd_fusion_p]
-            ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+        for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+            if ivd_fusion_p in ivd_x_pos:
+                ivd_xp = ivd_x_pos[ivd_fusion_p]
+                ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
 
-    ivd_ax.set_xticks(range(len(ivd_participants)))
-    ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in ivd_participants])
-    ivd_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-    ivd_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
-    ivd_ax.set_ylabel('% IVD volume above threshold')
-    ivd_ax.set_title('IVD strain ({} = {:.4f}, cohort-pooled): PreOp (no preload) vs PostOp, by fusion status'.format(
-        ivd_name.upper(), IVD_COHORT_THRESHOLDS[ivd_name]))
-    ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+        ivd_ax.set_xticks(range(len(ivd_participants)))
+        ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, order_score_by_participant[p]) for p in ivd_participants])
+        ivd_ax.annotate(ORDER_AXIS_LABEL, xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                         xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+        ivd_ax.set_xlabel(ORDER_XLABEL)
+        ivd_ax.set_ylabel('% IVD volume above threshold')
+        ivd_ax.set_title('IVD strain ({} = {:.4f}, cohort-pooled): PreOp (no preload) vs PostOp, by fusion status'.format(
+            ivd_name.upper(), IVD_COHORT_THRESHOLDS[ivd_name]))
+        ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
 
-    ivd_fig.tight_layout()
+        ivd_fig.tight_layout()
 
-    ivd_plot_path = os.path.join(OUT_DIR, 'multipatient_ivd_plot_{}_prepost_sortedbymjoachange.pdf'.format(ivd_name))
-    ivd_fig.savefig(ivd_plot_path, bbox_inches='tight')
-    plt.close(ivd_fig)
-    ivd_plot_paths.append(ivd_plot_path)
+        ivd_plot_path = os.path.join(
+            OUT_DIR, 'multipatient_ivd_plot_{}_prepost_{}.pdf'.format(ivd_name, ORDER_FILE_TAG))
+        ivd_fig.savefig(ivd_plot_path, bbox_inches='tight')
+        plt.close(ivd_fig)
+        ivd_plot_paths.append(ivd_plot_path)
 
-print()
-print("Summary saved: {}".format(ivd_summary_path))
-for _p in ivd_plot_paths:
-    print("Plot saved: {}".format(_p))
+    print()
+    print("Summary saved: {}".format(ivd_summary_path))
+    for _p in ivd_plot_paths:
+        print("Plot saved: {}".format(_p))
+
+plot_ivd_by_order()
+if PRODUCE_MCID:
+    plot_ivd_by_order(mcid=True)
 
 # ============================================================
 # Patient-wise version: each patient's own threshold, pooled from their own
@@ -1955,67 +2020,76 @@ ivd_pw_summary = ivd_pw_summary[ivd_pw_summary['participant'].isin(mjoa_delta_by
 ivd_pw_peak_summary = ivd_pw_peak_summary[ivd_pw_peak_summary['participant'].isin(mjoa_delta_by_participant)]
 
 ivd_pw_summary_path = os.path.join(
-    OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_sortedbymjoachange_patientwise.csv')
+    OUT_DIR, 'multipatient_ivd_summary_percentiles_prepost_{}_patientwise.csv'.format(ORDER_FILE_TAG))
 ivd_pw_summary.merge(ivd_pw_peak_summary, on=['participant', 'loading_condition', 'state']).to_csv(
     ivd_pw_summary_path, index=False)
 print()
 print(ivd_pw_summary.to_string(index=False))
 
-ivd_pw_plot_paths = []
-for ivd_name, ivd_p in IVD_PERCENTILES.items():
-    ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
-    ivd_col_df = ivd_pw_summary[ivd_pw_summary['percentile'] == ivd_name]
+def plot_ivd_patientwise_by_order(mcid=False):
+    order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(mcid)
+    ivd_participants = sorted(ivd_summary['participant'].unique(),
+                              key=lambda p: (order_score_by_participant[p], int(p[1:])))
+    ivd_x_pos = {p: i for i, p in enumerate(ivd_participants)}
+    ivd_pw_plot_paths = []
+    for ivd_name, ivd_p in IVD_PERCENTILES.items():
+        ivd_color = IVD_PERCENTILE_COLORS[ivd_name]
+        ivd_col_df = ivd_pw_summary[ivd_pw_summary['percentile'] == ivd_name]
 
-    ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
+        ivd_fig, ivd_ax = plt.subplots(figsize=(9, 5.5))
 
-    for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
-        for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
-            if len(ivd_state_grp) == 2:
-                ivd_xp = ivd_x_pos[ivd_participant_label]
-                ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
-                               color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
-    for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
-        ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
-        ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
-        ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
-        if ivd_filled:
-            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
-        else:
-            ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
-                            marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
+        for ivd_participant_label, ivd_grp in ivd_col_df.groupby('participant'):
+            for ivd_state, ivd_state_grp in ivd_grp.groupby('state'):
+                if len(ivd_state_grp) == 2:
+                    ivd_xp = ivd_x_pos[ivd_participant_label]
+                    ivd_ax.vlines(ivd_xp, ivd_state_grp['pct_above'].min(), ivd_state_grp['pct_above'].max(),
+                                   color=ivd_color, linewidth=1.0, alpha=0.5, zorder=2)
+        for (ivd_condition, ivd_state), ivd_grp in ivd_col_df.groupby(['loading_condition', 'state']):
+            ivd_marker = CONDITION_MARKERS.get(ivd_condition.strip().lower(), 'o')
+            ivd_filled = IVD_STATE_FILLED.get(ivd_state, True)
+            ivd_xs = [ivd_x_pos[p] for p in ivd_grp['participant']]
+            if ivd_filled:
+                ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], color=ivd_color, marker=ivd_marker, s=60, zorder=3)
+            else:
+                ivd_ax.scatter(ivd_xs, ivd_grp['pct_above'], facecolors='none', edgecolors=ivd_color,
+                                marker=ivd_marker, s=60, linewidths=1.4, zorder=3)
 
-    for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
-        if ivd_fusion_p in ivd_x_pos:
-            ivd_xp = ivd_x_pos[ivd_fusion_p]
-            ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
+        for ivd_fusion_p in sorted(DELTA_FUSION_PARTICIPANTS, key=lambda p: int(p[1:])):
+            if ivd_fusion_p in ivd_x_pos:
+                ivd_xp = ivd_x_pos[ivd_fusion_p]
+                ivd_ax.axvspan(ivd_xp - 0.5, ivd_xp + 0.5, color='orange', alpha=0.2, zorder=0)
 
-    # Starts at 0 explicitly - matplotlib's autoscale otherwise pads slightly below 0.
-    ivd_ax.set_ylim(bottom=0)
-    ivd_ax.set_xticks(range(len(ivd_participants)))
-    ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in ivd_participants])
-    ivd_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-    ivd_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
-    ivd_ax.set_ylabel('% IVD volume above threshold')
-    ivd_ax.set_title('IVD strain ({}, patient-specific threshold): PreOp (no preload) vs PostOp, '
-                      'by fusion status'.format(ivd_name.upper()))
-    ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+        # Starts at 0 explicitly - matplotlib's autoscale otherwise pads slightly below 0.
+        ivd_ax.set_ylim(bottom=0)
+        ivd_ax.set_xticks(range(len(ivd_participants)))
+        ivd_ax.set_xticklabels(['{}\n({:+.0f})'.format(p, order_score_by_participant[p]) for p in ivd_participants])
+        ivd_ax.annotate(ORDER_AXIS_LABEL, xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                         xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+        ivd_ax.set_xlabel(ORDER_XLABEL)
+        ivd_ax.set_ylabel('% IVD volume above threshold')
+        ivd_ax.set_title('IVD strain ({}, patient-specific threshold): PreOp (no preload) vs PostOp, '
+                          'by fusion status'.format(ivd_name.upper()))
+        ivd_ax.legend(handles=ivd_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
 
-    ivd_fig.tight_layout()
+        ivd_fig.tight_layout()
 
-    ivd_pw_plot_path = os.path.join(
-        OUT_DIR, 'multipatient_ivd_plot_{}_prepost_sortedbymjoachange_patientwise.pdf'.format(ivd_name))
-    ivd_fig.savefig(ivd_pw_plot_path, bbox_inches='tight')
-    plt.close(ivd_fig)
-    ivd_pw_plot_paths.append(ivd_pw_plot_path)
+        ivd_pw_plot_path = os.path.join(
+            OUT_DIR, 'multipatient_ivd_plot_{}_prepost_{}_patientwise.pdf'.format(ivd_name, ORDER_FILE_TAG))
+        ivd_fig.savefig(ivd_pw_plot_path, bbox_inches='tight')
+        plt.close(ivd_fig)
+        ivd_pw_plot_paths.append(ivd_pw_plot_path)
 
-# Dual-axis variant (adds each patient's own threshold value on a second
-# y-axis, '_w_thresholds' suffix) - NOT part of the current output set.
+    # Dual-axis variant (adds each patient's own threshold value on a second
+    # y-axis, '_w_thresholds' suffix) - NOT part of the current output set.
 
-print()
-print("Summary saved: {}".format(ivd_pw_summary_path))
-for _p in ivd_pw_plot_paths:
-    print("Plot saved: {}".format(_p))
+    print()
+    print("Summary saved: {}".format(ivd_pw_summary_path))
+    for _p in ivd_pw_plot_paths:
+        print("Plot saved: {}".format(_p))
+
+plot_ivd_patientwise_by_order()
+if PRODUCE_MCID:
+    plot_ivd_patientwise_by_order(mcid=True)
 
 # ============================================================
 # Fusion-patient PreOp vs PostOp diff, both threshold versions, as one
@@ -2607,7 +2681,7 @@ osc_x_pos = {p: i for i, p in enumerate(osc_participants)}
 # as that precedent.
 osc_mjoa_change_participants = sorted(
     (p for p in osc_participants if p in mjoa_delta_by_participant),
-    key=lambda p: (mjoa_delta_by_participant[p], int(p[1:])))
+    key=lambda p: (order_score_by_participant[p], int(p[1:])))
 osc_mjoa_change_x_pos = {p: i for i, p in enumerate(osc_mjoa_change_participants)}
 
 # ============================================================
@@ -2668,68 +2742,78 @@ for osc_state in OSC_STATES:
             columns={'pct_above_at_peak': 'pct_above'}).assign(metric=OSC_METRIC_AT_PEAK),
     ], ignore_index=True)
 
-    osc_fig, osc_ax = plt.subplots(figsize=(8, 5.5))
+    def plot_osc_cumulative_vs_peak(mcid=False):
+        order_score_by_participant, ORDER_AXIS_LABEL, ORDER_XLABEL, ORDER_FILE_TAG = _ordering(mcid)
+        osc_mjoa_change_participants = sorted(
+            (p for p in osc_participants if p in mjoa_delta_by_participant),
+            key=lambda p: (order_score_by_participant[p], int(p[1:])))
+        osc_mjoa_change_x_pos = {p: i for i, p in enumerate(osc_mjoa_change_participants)}
+        osc_fig, osc_ax = plt.subplots(figsize=(8, 5.5))
 
-    # Sorted by change in mJOA (not pre-op mJOA) - same precedent as Stage
-    # 1's "sortedbymjoachange" plots. Restricted to participants with both
-    # pre- and post-op mJOA.
-    osc_cvp_long_df = osc_long_df[osc_long_df['participant'].isin(osc_mjoa_change_participants)]
+        # Sorted by change in mJOA (not pre-op mJOA) - same precedent as Stage
+        # 1's "sortedbymjoachange" plots. Restricted to participants with both
+        # pre- and post-op mJOA.
+        osc_cvp_long_df = osc_long_df[osc_long_df['participant'].isin(osc_mjoa_change_participants)]
 
-    for osc_name in osc_display_thresholds:
-        osc_col_df = osc_cvp_long_df[osc_cvp_long_df['threshold'] == osc_name]
-        osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
-        for osc_participant, osc_grp in osc_col_df.groupby('participant'):
-            if len(osc_grp) == 2:
-                osc_xp = osc_mjoa_change_x_pos[osc_participant]
-                osc_ax.vlines(osc_xp, osc_grp['pct_above'].min(), osc_grp['pct_above'].max(),
-                               color=osc_color, linewidth=1.0, alpha=0.5, zorder=2)
-        for osc_metric, osc_grp in osc_col_df.groupby('metric'):
-            osc_filled = OSC_METRIC_FILLED.get(osc_metric, True)
-            osc_xs = [osc_mjoa_change_x_pos[p] for p in osc_grp['participant']]
-            if osc_filled:
-                osc_ax.scatter(osc_xs, osc_grp['pct_above'], color=osc_color, marker='o', s=55, zorder=3)
-            else:
-                osc_ax.scatter(osc_xs, osc_grp['pct_above'], facecolors='none', edgecolors=osc_color, marker='o',
-                                s=55, linewidths=1.3, zorder=3)
+        for osc_name in osc_display_thresholds:
+            osc_col_df = osc_cvp_long_df[osc_cvp_long_df['threshold'] == osc_name]
+            osc_color = OSC_CACHE_THRESHOLD_COLORS[osc_name]
+            for osc_participant, osc_grp in osc_col_df.groupby('participant'):
+                if len(osc_grp) == 2:
+                    osc_xp = osc_mjoa_change_x_pos[osc_participant]
+                    osc_ax.vlines(osc_xp, osc_grp['pct_above'].min(), osc_grp['pct_above'].max(),
+                                   color=osc_color, linewidth=1.0, alpha=0.5, zorder=2)
+            for osc_metric, osc_grp in osc_col_df.groupby('metric'):
+                osc_filled = OSC_METRIC_FILLED.get(osc_metric, True)
+                osc_xs = [osc_mjoa_change_x_pos[p] for p in osc_grp['participant']]
+                if osc_filled:
+                    osc_ax.scatter(osc_xs, osc_grp['pct_above'], color=osc_color, marker='o', s=55, zorder=3)
+                else:
+                    osc_ax.scatter(osc_xs, osc_grp['pct_above'], facecolors='none', edgecolors=osc_color, marker='o',
+                                    s=55, linewidths=1.3, zorder=3)
 
-    osc_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
-                                     label='{:g}'.format(val))
-                              for name, val in osc_display_thresholds.items()]
-    osc_metric_handles = [
-        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black',
-               label='Cumulative (ever exceeds)'),
-        Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none',
-               label='At-peak (worst single frame)'),
-    ]
-    osc_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
+        osc_threshold_handles = [Line2D([0], [0], marker='o', linestyle='', color=OSC_CACHE_THRESHOLD_COLORS[name],
+                                         label='{:g}'.format(val))
+                                  for name, val in osc_display_thresholds.items()]
+        osc_metric_handles = [
+            Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='black',
+                   label='Cumulative (ever exceeds)'),
+            Line2D([0], [0], marker='o', linestyle='', color='black', markerfacecolor='none',
+                   label='At-peak (worst single frame)'),
+        ]
+        osc_blank = Line2D([0], [0], linestyle='none', marker='None', label='')
 
-    osc_all_handles = (
-        [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_threshold_handles +
-        [osc_blank] +
-        [Line2D([0], [0], linestyle='none', marker='None', label='Metric')] + osc_metric_handles
-    )
-    osc_ax.legend(handles=osc_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
+        osc_all_handles = (
+            [Line2D([0], [0], linestyle='none', marker='None', label='Threshold')] + osc_threshold_handles +
+            [osc_blank] +
+            [Line2D([0], [0], linestyle='none', marker='None', label='Metric')] + osc_metric_handles
+        )
+        osc_ax.legend(handles=osc_all_handles, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=False)
 
-    osc_ax.set_xticks(range(len(osc_mjoa_change_participants)))
-    osc_ax.set_xticklabels(
-        ['{}\n({:+.0f})'.format(p, mjoa_delta_by_participant[p]) for p in osc_mjoa_change_participants])
-    osc_ax.annotate('Δ mJOA', xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
-                     xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
-    osc_ax.set_xlabel('Participant (ordered by change in mJOA, postop - preop, ascending)')
-    osc_ax.set_ylabel('% cord volume above threshold')
-    osc_ax.set_title('Oscillation ({}): cumulative (ever-exceeds) vs. at-peak (simultaneous) % cord volume'.format(
-        osc_state))
-    osc_fig.tight_layout()
+        osc_ax.set_xticks(range(len(osc_mjoa_change_participants)))
+        osc_ax.set_xticklabels(
+            ['{}\n({:+.0f})'.format(p, order_score_by_participant[p]) for p in osc_mjoa_change_participants])
+        osc_ax.annotate(ORDER_AXIS_LABEL, xy=(0, 0), xycoords=('axes fraction', 'axes fraction'),
+                         xytext=(-12, -26), textcoords='offset points', ha='right', va='center')
+        osc_ax.set_xlabel(ORDER_XLABEL)
+        osc_ax.set_ylabel('% cord volume above threshold')
+        osc_ax.set_title('Oscillation ({}): cumulative (ever-exceeds) vs. at-peak (simultaneous) % cord volume'.format(
+            osc_state))
+        osc_fig.tight_layout()
 
-    osc_plot_path = os.path.join(
-        STAGE3_RESULTS_DIR,
-        'multipatient_mps_plot_oscillation_cumulative_vs_peak_sortedbymjoachange_{}.pdf'.format(osc_state_tag))
-    osc_fig.savefig(osc_plot_path, bbox_inches='tight')
-    plt.close(osc_fig)
+        osc_plot_path = os.path.join(
+            STAGE3_RESULTS_DIR,
+            'multipatient_mps_plot_oscillation_cumulative_vs_peak_{}_{}.pdf'.format(ORDER_FILE_TAG, osc_state_tag))
+        osc_fig.savefig(osc_plot_path, bbox_inches='tight')
+        plt.close(osc_fig)
 
-    print()
-    print("Summary saved: {}".format(osc_summary_path))
-    print("Plot saved: {}".format(osc_plot_path))
+        print()
+        print("Summary saved: {}".format(osc_summary_path))
+        print("Plot saved: {}".format(osc_plot_path))
+
+    plot_osc_cumulative_vs_peak()
+    if PRODUCE_MCID:
+        plot_osc_cumulative_vs_peak(mcid=True)
 
     # --- Plot 2: Delta (At-peak worst single frame MINUS Baseline). Baseline
     # is the pre-oscillation starting state (frame_index==0 of the same
