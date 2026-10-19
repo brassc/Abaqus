@@ -25,6 +25,7 @@ wheels/
 DCM_Scripting/Data_Extraction/patient_metadata.csv
 DCM_Scripting/id_map*.csv
 DCM_Scripting/classification.csv
+DCM_Scripting/extraction_block_counterfactual*
 
 # Regenerable cache files (derived from raw extraction data, rebuilt by the scripts)
 DCM_Scripting/cache_*.csv
