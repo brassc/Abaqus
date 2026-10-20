@@ -23,7 +23,7 @@ wheels/
 
 # Patient metadata (contains identifiable data - do not sync)
 DCM_Scripting/Data_Extraction/patient_metadata.csv
-DCM_Scripting/id_map*.csv
+DCM_Scripting/id_map*.csv*
 DCM_Scripting/classification.csv
 DCM_Scripting/extraction_block_counterfactual*
 
