@@ -1026,66 +1026,118 @@ print("Plot saved: {}".format(forest_path))
 from matplotlib.colors import to_rgba
 
 BOX_NAVY, BOX_TEAL = '#003f5c', '#58a4b0'
-box_ymax = max(stats[(c, PRIMARY_THRESHOLD)]['wide'][['lami', 'fusion']].values.max()
-               for c in LOADING_CONDITIONS) * 1.25
-box_fig, box_axes = plt.subplots(1, len(LOADING_CONDITIONS), figsize=(10, 5.5), sharey=True)
-for ax, condition in zip(box_axes, LOADING_CONDITIONS):
-    wide = stats[(condition, PRIMARY_THRESHOLD)]['wide']
-    t = stats[(condition, PRIMARY_THRESHOLD)]['tests']
-    lami_vals, fusion_vals = wide['lami'].values, wide['fusion'].values
-    box = ax.boxplot([lami_vals, fusion_vals], positions=[0, 1], widths=0.35,
-                     showfliers=False, patch_artist=True, zorder=2)
-    for patch in box['boxes']:
-        patch.set_facecolor(to_rgba(BOX_TEAL, 0.4))
-        patch.set_edgecolor('black')
-        patch.set_linewidth(0.5)
-    for part in ('whiskers', 'caps', 'medians'):
-        for line in box[part]:
-            line.set_color('black')
-            line.set_linewidth(0.5)
-    for p_label, r in wide.iterrows():
-        ax.plot([0, 1], [r['lami'], r['fusion']],
-                color=FUSION_SPAN_COLOR if r['gt_fusion'] else 'grey',
-                linewidth=1.0 if r['gt_fusion'] else 0.6, alpha=0.9 if r['gt_fusion'] else 0.5, zorder=2.5)
-    marker = CONDITION_MARKERS[condition]
-    ax.scatter([0] * len(lami_vals), lami_vals, color=BOX_NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
-    ax.scatter([1] * len(fusion_vals), fusion_vals, color=BOX_NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
 
-    p = t['signrank']['p']
-    p_text = 'n/a' if (p is None or np.isnan(p)) else ('p < 0.001' if p < 0.001 else 'p = {:.3f}'.format(p))
-    bracket_y, tick = (0.50 if condition == 'Extension' else 0.90) * box_ymax, 0.03 * box_ymax
-    ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
-            color='black', linewidth=1.2, zorder=6)
-    ax.text(0.5, bracket_y + 0.01 * box_ymax, p_text, ha='center', va='bottom', fontsize=10)
-    ax.set_xticks([0, 1])
-    ax.set_xticklabels(['Laminectomy\nOnly', 'Laminectomy\n& Fusion'])
-    ax.set_xlabel(condition)
-    # Pair counts as small sub-text under the condition name (separate annotation so only it is smaller).
-    ax.annotate('{} pairs: {} differ, {} tied at zero'.format(t['n'], t['n_differ'], t['n'] - t['n_differ']),
-                xy=(0.5, 0), xycoords=ax.xaxis.label, xytext=(0, -4), textcoords='offset points',
-                ha='center', va='top', fontsize=10)
-    ax.set_ylim(-0.05 * box_ymax, box_ymax)
-    ax.set_xlim(-0.5, 1.5)
-box_axes[0].set_ylabel('% of cord volume above MPS {:g}'.format(PRIMARY_THRESHOLD))
-box_handles = [
-    Line2D([0], [0], marker=CONDITION_MARKERS['Flexion'], linestyle='', markerfacecolor=BOX_NAVY,
-           markeredgecolor=BOX_NAVY, alpha=0.7, label='Flexion'),
-    Line2D([0], [0], marker=CONDITION_MARKERS['Extension'], linestyle='', markerfacecolor=BOX_NAVY,
-           markeredgecolor=BOX_NAVY, alpha=0.7, label='Extension'),
-    Line2D([0], [0], color=FUSION_SPAN_COLOR, linewidth=1.2, label='Fusion Performed'),
-]
-box_axes[-1].legend(handles=box_handles, loc='upper right', frameon=False, fontsize=10)
-box_fig.suptitle('% cord volume above threshold: laminectomy only vs laminectomy with fusion '
-                 '(exact signed-rank test)')
-box_fig.tight_layout()
-box_fig.text(0.5, -0.03,
+
+def paired_boxplot(wides, tests, ylabel, title, path, bracket_frac, headroom=1.25):
+    """wides[condition]: DataFrame (lami, fusion, gt_fusion) indexed by patient;
+    tests[condition]: dict(p, n, n_differ) from the primary exact signed-rank test."""
+    ymax = max(w[['lami', 'fusion']].values.max() for w in wides.values()) * headroom
+    fig, axes = plt.subplots(1, len(LOADING_CONDITIONS), figsize=(10, 5.5), sharey=True)
+    for ax, condition in zip(axes, LOADING_CONDITIONS):
+        wide, t = wides[condition], tests[condition]
+        lami_vals, fusion_vals = wide['lami'].values, wide['fusion'].values
+        box = ax.boxplot([lami_vals, fusion_vals], positions=[0, 1], widths=0.35,
+                         showfliers=False, patch_artist=True, zorder=2)
+        for patch in box['boxes']:
+            patch.set_facecolor(to_rgba(BOX_TEAL, 0.4))
+            patch.set_edgecolor('black')
+            patch.set_linewidth(0.5)
+        for part in ('whiskers', 'caps', 'medians'):
+            for line in box[part]:
+                line.set_color('black')
+                line.set_linewidth(0.5)
+        for p_label, r in wide.iterrows():
+            ax.plot([0, 1], [r['lami'], r['fusion']],
+                    color=FUSION_SPAN_COLOR if r['gt_fusion'] else 'grey',
+                    linewidth=1.0 if r['gt_fusion'] else 0.6, alpha=0.9 if r['gt_fusion'] else 0.5, zorder=2.5)
+        marker = CONDITION_MARKERS[condition]
+        ax.scatter([0] * len(lami_vals), lami_vals, color=BOX_NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+        ax.scatter([1] * len(fusion_vals), fusion_vals, color=BOX_NAVY, s=25, alpha=0.7, marker=marker, zorder=3)
+
+        p = t['p']
+        p_text = 'n/a' if (p is None or np.isnan(p)) else ('p < 0.001' if p < 0.001 else 'p = {:.3f}'.format(p))
+        bracket_y, tick = bracket_frac[condition] * ymax, 0.03 * ymax
+        ax.plot([0, 0, 1, 1], [bracket_y - tick, bracket_y, bracket_y, bracket_y - tick],
+                color='black', linewidth=1.2, zorder=6)
+        ax.text(0.5, bracket_y + 0.01 * ymax, p_text, ha='center', va='bottom', fontsize=10)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['Laminectomy\nOnly', 'Laminectomy\n& Fusion'])
+        ax.set_xlabel(condition)
+        # Pair counts as sub-text under the condition name (separate annotation so only it is smaller).
+        ax.annotate('{} pairs: {} differ, {} tied at zero'.format(t['n'], t['n_differ'], t['n'] - t['n_differ']),
+                    xy=(0.5, 0), xycoords=ax.xaxis.label, xytext=(0, -4), textcoords='offset points',
+                    ha='center', va='top', fontsize=10)
+        ax.set_ylim(-0.05 * ymax, ymax)
+        ax.set_xlim(-0.5, 1.5)
+    axes[0].set_ylabel(ylabel)
+    handles = [
+        Line2D([0], [0], marker=CONDITION_MARKERS['Flexion'], linestyle='', markerfacecolor=BOX_NAVY,
+               markeredgecolor=BOX_NAVY, alpha=0.7, label='Flexion'),
+        Line2D([0], [0], marker=CONDITION_MARKERS['Extension'], linestyle='', markerfacecolor=BOX_NAVY,
+               markeredgecolor=BOX_NAVY, alpha=0.7, label='Extension'),
+        Line2D([0], [0], color=FUSION_SPAN_COLOR, linewidth=1.2, label='Fusion Performed'),
+    ]
+    axes[-1].legend(handles=handles, loc='upper right', frameon=False, fontsize=10)
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.text(0.5, -0.03,
              'p-values: exact Wilcoxon signed-rank test (Pratt zero handling) on the paired patient\n'
              'differences (fusion − lami); flexion and extension tested separately.',
              ha='center', va='top', fontsize=10)
-box_path = os.path.join(OUT_DIR, 'fusion_vs_lami_boxplot.pdf')
-box_fig.savefig(box_path, bbox_inches='tight')
-plt.close(box_fig)
-print("Plot saved: {}".format(box_path))
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    print("Plot saved: {}".format(path))
+
+
+# Cord: % volume above MPS 0.015
+paired_boxplot(
+    {c: stats[(c, PRIMARY_THRESHOLD)]['wide'] for c in LOADING_CONDITIONS},
+    {c: {'p': stats[(c, PRIMARY_THRESHOLD)]['tests']['signrank']['p'],
+         'n': stats[(c, PRIMARY_THRESHOLD)]['tests']['n'],
+         'n_differ': stats[(c, PRIMARY_THRESHOLD)]['tests']['n_differ']} for c in LOADING_CONDITIONS},
+    '% of cord volume above MPS {:g}'.format(PRIMARY_THRESHOLD),
+    '% cord volume above threshold: laminectomy only vs laminectomy with fusion (exact signed-rank test)',
+    os.path.join(OUT_DIR, 'fusion_vs_lami_boxplot.pdf'),
+    {'Flexion': 0.90, 'Extension': 0.50})
+
+# IVD: the same primary test and plot for four thresholds, all from the 48 PostOp models (Part B):
+# global T95, patient-specific T95 (per patient, pooled over their 4 jobs), global T90 and global T99.
+ivd_groups = dict(list(ivd_df.groupby(['participant', 'loading_condition', 'arm'])))
+IVD_VARIANTS = [   # (column in ivd_summary, y-axis threshold label, title threshold label, file tag)
+    ('pct_above_global', 'global T95 ({:.4f})'.format(ivd_global_threshold), 'global T95', 't95_global'),
+    ('pct_above_patient', 'patient-specific T95', 'patient-specific T95', 't95_patientwise'),
+]
+for q, tag in ((0.90, 't90'), (0.99, 't99')):
+    thr = volume_weighted_percentile(ivd_df, p=q)
+    col = 'pct_above_global_' + tag
+    ivd_summary[col] = [pct_volume_above(ivd_groups[(r.participant, r.loading_condition, r.arm)], thr)
+                        for r in ivd_summary.itertuples()]
+    IVD_VARIANTS.append((col, 'global {} ({:.4f})'.format(tag.upper(), thr), 'global ' + tag.upper(),
+                         tag + '_global'))
+
+for col, thr_label, title_label, tag in IVD_VARIANTS:
+    ivd_wides, ivd_tests = {}, {}
+    for condition in LOADING_CONDITIONS:
+        sub = ivd_summary[(ivd_summary['loading_condition'] == condition) &
+                          ~ivd_summary['p_label'].isin([p for p, c in EXCLUDE_PAIRS if c == condition])]
+        w = sub.pivot_table(index='p_label', columns='arm', values=col)
+        w['gt_fusion'] = [p in fusion_participants for p in w.index]
+        d = (w['fusion'] - w['lami']).values.astype(float)
+        sr = _named(ro.r['signrank_pratt_test'](ro.FloatVector(d)))
+        if not np.isnan(sr['p']) and abs(sr['p'] - sr['p_enum']) > 1e-9:
+            raise SystemExit("coin and base-R enumeration disagree for IVD {} {} ({} vs {})".format(
+                title_label, condition, sr['p'], sr['p_enum']))
+        ivd_wides[condition] = w
+        ivd_tests[condition] = {'p': sr['p'], 'n': len(d), 'n_differ': int((np.abs(d) > ZERO_TOL).sum())}
+        print("IVD {} {}: {} pairs, {} differ; signed-rank p = {}".format(
+            title_label, condition, len(d), ivd_tests[condition]['n_differ'], _fmt_p(sr['p'])))
+    paired_boxplot(
+        ivd_wides, ivd_tests,
+        '% of IVD volume above {}'.format(thr_label),
+        '% IVD volume above {}: laminectomy only vs laminectomy with fusion (exact signed-rank test)'.format(
+            title_label),
+        os.path.join(OUT_DIR, 'fusion_vs_lami_ivd_boxplot_{}.pdf'.format(tag)),
+        {'Flexion': 0.76, 'Extension': 0.76}, headroom=1.5)
 
 # ------------------------------------------------------------
 # Markdown write-up
