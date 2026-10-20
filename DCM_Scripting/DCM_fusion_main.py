@@ -294,12 +294,13 @@ def attach_info(summary):
 # Plot helper: Flexion | Extension panels, patients grouped by category,
 # lami vs fusion markers joined per patient, orange fill = actually fused.
 # ============================================================
-def x_layout():
+def x_layout(cat_map=None):
     """x position per patient: grouped by category, then patient number."""
+    cat_map = cat_map or category_by_participant
     positions, group_spans = {}, {}
     x = 0.0
     for cat in sorted(CATEGORY_NAMES):
-        members = sorted((p for p, c in category_by_participant.items()
+        members = sorted((p for p, c in cat_map.items()
                           if c == cat and p in set(jobs['p_label'])), key=lambda p: int(p[1:]))
         if not members:
             continue
@@ -972,49 +973,58 @@ stats_summary_df.to_csv(os.path.join(OUT_DIR, 'fusion_vs_lami_stats_summary.csv'
 # ------------------------------------------------------------
 # Forest-style plot of the paired differences (descriptive, grouped by category)
 # ------------------------------------------------------------
-positions, group_spans = x_layout()
-fig, axes = plt.subplots(1, len(LOADING_CONDITIONS), figsize=(13, 5), sharey=True)
-all_d = np.concatenate([stats[(c, PRIMARY_THRESHOLD)]['wide']['diff'].values for c in LOADING_CONDITIONS])
-ylim = (min(all_d.min() * 1.15, -1), max(all_d.max() * 1.15, 1))
-for ax, condition in zip(axes, LOADING_CONDITIONS):
-    wide = stats[(condition, PRIMARY_THRESHOLD)]['wide']
-    for p in fusion_participants:
-        if p in positions:
-            ax.axvspan(positions[p] - 0.5, positions[p] + 0.5, color=FUSION_SPAN_COLOR, alpha=0.2, zorder=0)
-    ax.axhline(0, color='black', linewidth=0.8, zorder=1)
-    for p_label, r in wide.iterrows():
-        if r['both_zero']:
-            ax.scatter(positions[p_label], 0, facecolors='none', edgecolors='0.4', marker='o', s=55, zorder=3)
-        else:
-            ax.scatter(positions[p_label], r['diff'], color='#2e75b6', marker='o', s=55, zorder=3)
-    for cat, (x0, x1, n) in group_spans.items():
-        ax.text((x0 + x1) / 2, 1.0, '{} (n={})'.format(CATEGORY_NAMES[cat], n),
-                transform=ax.get_xaxis_transform(), ha='center', va='bottom', fontsize=10)
-        if cat != min(group_spans):
-            ax.axvline(x0 - (GROUP_GAP + 1.0) / 2, color='0.7', linestyle=':', linewidth=0.8, zorder=1)
-    ordered = sorted(positions, key=lambda p: positions[p])
-    ax.set_xticks([positions[p] for p in ordered])
-    ax.set_xticklabels(ordered)
-    ax.set_xlim(-0.7, max(positions.values()) + 0.7)
-    ax.set_ylim(ylim)
-    ax.set_title(condition, pad=22)
-    ax.set_xlabel('Participant (grouped by {} category)'.format(CATEGORY_SOURCE))
-    excluded_here = sorted(p for p, c in EXCLUDE_PAIRS if c == condition)
-    if excluded_here:
-        ax.text(0.01, 0.02, 'Excluded (invalid model): {}'.format(', '.join(excluded_here)),
-                transform=ax.transAxes, fontsize=9, color='firebrick')
-axes[0].set_ylabel('Fusion \u2212 lami\n(% cord volume above {:g})'.format(PRIMARY_THRESHOLD))
-handles = [Line2D([0], [0], marker='o', linestyle='', color='#2e75b6', label='Paired difference'),
-           Line2D([0], [0], marker='o', linestyle='', markerfacecolor='none', markeredgecolor='0.4',
-                  label='Both arms zero (difference 0)'),
-           Patch(facecolor=FUSION_SPAN_COLOR, alpha=0.2, label='Fusion performed (ground truth)')]
-fig.legend(handles=handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
-fig.suptitle('Paired difference, fusion minus laminectomy only (MPS \u2265 {:g})'.format(PRIMARY_THRESHOLD), y=1.04)
-fig.tight_layout()
-forest_path = os.path.join(OUT_DIR, 'fusion_vs_lami_paired_difference_plot.pdf')
-fig.savefig(forest_path, bbox_inches='tight')
-plt.close(fig)
-print("Plot saved: {}".format(forest_path))
+def paired_difference_plot(cat_map, source, path):
+    """Paired difference (fusion - lami) per patient, grouped by the given category mapping."""
+    positions, group_spans = x_layout(cat_map)
+    fig, axes = plt.subplots(1, len(LOADING_CONDITIONS), figsize=(13, 5), sharey=True)
+    all_d = np.concatenate([stats[(c, PRIMARY_THRESHOLD)]['wide']['diff'].values for c in LOADING_CONDITIONS])
+    ylim = (min(all_d.min() * 1.15, -1), max(all_d.max() * 1.15, 1))
+    for ax, condition in zip(axes, LOADING_CONDITIONS):
+        wide = stats[(condition, PRIMARY_THRESHOLD)]['wide']
+        for p in fusion_participants:
+            if p in positions:
+                ax.axvspan(positions[p] - 0.5, positions[p] + 0.5, color=FUSION_SPAN_COLOR, alpha=0.2, zorder=0)
+        ax.axhline(0, color='black', linewidth=0.8, zorder=1)
+        for p_label, r in wide.iterrows():
+            if r['both_zero']:
+                ax.scatter(positions[p_label], 0, facecolors='none', edgecolors='0.4', marker='o', s=55, zorder=3)
+            else:
+                ax.scatter(positions[p_label], r['diff'], color='#2e75b6', marker='o', s=55, zorder=3)
+        for cat, (x0, x1, n) in group_spans.items():
+            ax.text((x0 + x1) / 2, 1.0, '{} (n={})'.format(CATEGORY_NAMES[cat], n),
+                    transform=ax.get_xaxis_transform(), ha='center', va='bottom', fontsize=10)
+            if cat != min(group_spans):
+                ax.axvline(x0 - (GROUP_GAP + 1.0) / 2, color='0.7', linestyle=':', linewidth=0.8, zorder=1)
+        ordered = sorted(positions, key=lambda p: positions[p])
+        ax.set_xticks([positions[p] for p in ordered])
+        ax.set_xticklabels(ordered)
+        ax.set_xlim(-0.7, max(positions.values()) + 0.7)
+        ax.set_ylim(ylim)
+        ax.set_title(condition, pad=22)
+        ax.set_xlabel('Participant (grouped by {} category)'.format(source))
+        excluded_here = sorted(p for p, c in EXCLUDE_PAIRS if c == condition)
+        if excluded_here:
+            ax.text(0.01, 0.02, 'Excluded (invalid model): {}'.format(', '.join(excluded_here)),
+                    transform=ax.transAxes, fontsize=9, color='firebrick')
+    axes[0].set_ylabel('Fusion \u2212 lami\n(% cord volume above {:g})'.format(PRIMARY_THRESHOLD))
+    handles = [Line2D([0], [0], marker='o', linestyle='', color='#2e75b6', label='Paired difference'),
+               Line2D([0], [0], marker='o', linestyle='', markerfacecolor='none', markeredgecolor='0.4',
+                      label='Both arms zero (difference 0)'),
+               Patch(facecolor=FUSION_SPAN_COLOR, alpha=0.2, label='Fusion performed (ground truth)')]
+    fig.legend(handles=handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False)
+    fig.suptitle('Paired difference, fusion minus laminectomy only (MPS \u2265 {:g})'.format(PRIMARY_THRESHOLD), y=1.04)
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    print("Plot saved: {}".format(path))
+
+
+paired_difference_plot(category_by_participant, CATEGORY_SOURCE,
+                       os.path.join(OUT_DIR, 'fusion_vs_lami_paired_difference_plot.pdf'))
+category_preop = {'P{}'.format(int(r['participant'])): int(r['Category'])
+                  for _, r in classification[classification['State'] == 'PreOp'].iterrows()}
+paired_difference_plot(category_preop, 'PreOp',
+                       os.path.join(OUT_DIR, 'fusion_vs_lami_paired_difference_plot_preopgrouped.pdf'))
 
 # ------------------------------------------------------------
 # Paired boxplot, same style as DCM_main.py's whole-cord boxplot: laminectomy only vs
@@ -1102,6 +1112,27 @@ paired_boxplot(
 
 # IVD: the same primary test and plot for four thresholds, all from the 48 PostOp models (Part B):
 # global T95, patient-specific T95 (per patient, pooled over their 4 jobs), global T90 and global T99.
+# Headline table rows (outcome, condition, median paired difference, signed-rank p): cord here, IVD in the loop below.
+ro.r('''
+    # Exact distribution-free CI for the median (order statistics + binomial): [d_(l), d_(n+1-l)],
+    # l = qbinom(alpha/2, n, 0.5). Coverage is at least 1 - alpha (96.1% for n = 12).
+    median_ci <- function(d, alpha = 0.05) {
+        d <- sort(d); n <- length(d); l <- qbinom(alpha / 2, n, 0.5)
+        c(d[l], d[n + 1 - l])
+    }
+''')
+
+
+def _median_ci(d):
+    lo, hi = ro.r['median_ci'](ro.FloatVector([float(x) for x in d]))
+    return float(lo), float(hi)
+
+
+headline_rows = []
+for c in LOADING_CONDITIONS:
+    d_cord = stats[(c, PRIMARY_THRESHOLD)]['wide']['diff'].values
+    headline_rows.append(('Cord, MPS ≥ {:g}'.format(PRIMARY_THRESHOLD), c, float(np.median(d_cord)),
+                          *_median_ci(d_cord), stats[(c, PRIMARY_THRESHOLD)]['tests']['signrank']['p']))
 ivd_groups = dict(list(ivd_df.groupby(['participant', 'loading_condition', 'arm'])))
 IVD_VARIANTS = [   # (column in ivd_summary, y-axis threshold label, title threshold label, file tag)
     ('pct_above_global', 'global T95 ({:.4f})'.format(ivd_global_threshold), 'global T95', 't95_global'),
@@ -1131,6 +1162,8 @@ for col, thr_label, title_label, tag in IVD_VARIANTS:
         ivd_tests[condition] = {'p': sr['p'], 'n': len(d), 'n_differ': int((np.abs(d) > ZERO_TOL).sum())}
         print("IVD {} {}: {} pairs, {} differ; signed-rank p = {}".format(
             title_label, condition, len(d), ivd_tests[condition]['n_differ'], _fmt_p(sr['p'])))
+        if tag == 't95_global':    # headline table: IVD global T95 only
+            headline_rows.append(('IVD, ' + title_label, condition, float(np.median(d)), *_median_ci(d), sr['p']))
     paired_boxplot(
         ivd_wides, ivd_tests,
         '% of IVD volume above {}'.format(thr_label),
@@ -1155,6 +1188,20 @@ if EXCLUDE_PAIRS:
     md.append("**Excluded (invalid model, to be re-run):** {}.".format(
         ', '.join('{} {}'.format(p, c) for p, c in sorted(EXCLUDE_PAIRS))))
     md.append("")
+
+md.append("#### Headline results")
+md.append("")
+md.append("| Outcome | Condition | Median difference, fusion - lami (pp) (95% CI) | Wilcoxon signed-rank p |")
+md.append("|---|---|---|---|")
+for outcome, condition, median_diff, ci_low, ci_high, p in headline_rows:
+    md.append("| {} | {} | {:+.2f} ({:+.2f} to {:+.2f}) | {} |".format(
+        outcome, condition, median_diff, ci_low, ci_high, _fmt_p(p)))
+md.append("")
+md.append("Median difference = median of the 12 paired differences (fusion - lami), in percentage points of volume "
+          "above the threshold. The 95% CI is the exact distribution-free interval for the median (order statistics, "
+          "binomial; coverage at least 95%, 96.1% for 12 pairs). p = exact Wilcoxon signed-rank test (Pratt zero "
+          "handling). Flexion and extension are separate hypotheses, each tested once.")
+md.append("")
 
 for condition in LOADING_CONDITIONS:
     s = stats[(condition, PRIMARY_THRESHOLD)]
@@ -1223,5 +1270,13 @@ md_path = os.path.join(OUT_DIR, 'summary_fusion_vs_lami.md')
 with open(md_path, 'w', encoding='utf-8') as f:
     f.write("\n".join(md) + "\n")
 print("Summary saved: {}".format(md_path))
+
+# Headline table on its own (same lines as in the summary above, so the two cannot differ).
+_h0 = md.index("#### Headline results")
+_h1 = next(i for i, line in enumerate(md) if i > _h0 and line.startswith("#### Flexion"))
+table_only_path = os.path.join(OUT_DIR, 'summary_table_only.md')
+with open(table_only_path, 'w', encoding='utf-8') as f:
+    f.write("\n".join(md[_h0:_h1]).rstrip("\n") + "\n")
+print("Table saved: {}".format(table_only_path))
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')   # cp1252 consoles cannot print the minus sign
 print("\n".join(md))
