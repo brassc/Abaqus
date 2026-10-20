@@ -40,16 +40,16 @@ No difference in % of whole cord volume above MPS $=0.015$ between PreOp (no pre
 
 | Term | Estimate | Std. Error | df | t value | Pr(>\|t\|) |
 |---|---|---|---|---|---|
-| (Intercept) | 5.022 | 0.8198 | 21.95 | 6.125 | 3.673e-06 |
-| statePostOp | -4.588 | 1.133 | 11 | -4.051 | 0.001911 |
+| (Intercept) | 5.022 | 0.8187 | 21.97 | 6.134 | 3.597e-06 |
+| statePostOp | -4.686 | 1.135 | 11 | -4.129 | 0.001675 |
 
 **Random effects**
 
 | Group | Variance | Std.Dev. |
 |---|---|---|
-| patient | 0.3692 | 0.6076 |
-| Residual | 7.696 | 2.774 |
+| patient | 0.3163 | 0.5624 |
+| Residual | 7.728 | 2.78 |
 
-**ICC = 0.046**
+**ICC = 0.039**
 
-**Shapiro-Wilk (residuals)**: W = 0.9455, p = 0.2157
+**Shapiro-Wilk (residuals)**: W = 0.9393, p = 0.1576

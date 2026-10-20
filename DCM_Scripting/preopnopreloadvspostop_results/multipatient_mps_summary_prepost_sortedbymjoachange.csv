@@ -63,10 +63,10 @@ P4,Flexion,PreOp-NoPreload,t0p01,45.40424827598956
 P4,Flexion,PreOp-NoPreload,t0p015,35.4619242069364
 P4,Flexion,PreOp-NoPreload,t0p02,27.124735674874636
 P4,Flexion,PreOp-NoPreload,t0p025,21.12429904912555
-P5,Extension,PostOp,t0p01,1.6344466205414163
-P5,Extension,PostOp,t0p015,1.1688270773311233
-P5,Extension,PostOp,t0p02,0.933228916622172
-P5,Extension,PostOp,t0p025,0.7526278430156754
+P5,Extension,PostOp,t0p01,0.0
+P5,Extension,PostOp,t0p015,0.0
+P5,Extension,PostOp,t0p02,0.0
+P5,Extension,PostOp,t0p025,0.0
 P5,Extension,PreOp-NoPreload,t0p01,8.861303326600058
 P5,Extension,PreOp-NoPreload,t0p015,5.519875898646011
 P5,Extension,PreOp-NoPreload,t0p02,3.5682801514240094
