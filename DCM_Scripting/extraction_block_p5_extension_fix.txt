@@ -1,0 +1,59 @@
+# Paste into the Abaqus CAE kernel. Re-extracts Cord, GM/WM and IVD for the two P5 (N01-014)
+# PostOp Extension jobs AFTER their .inp rotation was corrected (0.35 -> -0.175) and the jobs re-run.
+# Overwrites the stale _mps / _topology / _mps_GM_WM / _ivd_mps CSVs next to each ODB.
+import os
+
+DCM_DIR = r'C:\Users\cmb247\repos\Abaqus\DCM_Scripting'
+ID_MAP = DCM_DIR + r'\id_map.csv'
+ID_MAP_CF = DCM_DIR + r'\id_map_counterfactual.csv'
+
+SCRIPTS = [
+    'Alex_results_extraction.py',
+    'Alex_results_extraction_GM_WM.py',
+    'Alex_results_extraction_IVD.py',
+]
+
+# (odb_path, id_map that holds its row). Only Alex_results_extraction.py reads ID_MAP_PATH.
+JOBS = [
+    # factual: fusion, extension
+    (r'D:\Charlotte\ABAQUS\N01-014\Job-017-N01-014-PostOpv4-BCminus0pt175-rigidbody\Job-017-N01-014-PostOpv4-BCminus0pt175-rigidbody.odb', ID_MAP),
+    # counterfactual: fusion removed (lami), extension
+    (r'D:\Charlotte\ABAQUS\N01-014\Job-517-N01-014-PostOpv4-BCminus0pt175-nofusion\Job-517-N01-014-PostOpv4-BCminus0pt175-nofusion.odb', ID_MAP_CF),
+]
+
+# execfile() does not exist in a Python 3 kernel; this keeps the same call working.
+try:
+    execfile
+except NameError:
+    def execfile(path, g=None):
+        exec(compile(open(path).read(), path, 'exec'), g if g is not None else globals())
+
+SKIPPED, ERRORS = [], []
+for ODB_PATH, ID_MAP_PATH in JOBS:
+    inp_path = os.path.splitext(ODB_PATH)[0] + '.inp'
+    if not os.path.isfile(ODB_PATH):
+        print('MISSING (job not re-run yet?): ' + ODB_PATH)
+        SKIPPED.append(ODB_PATH)
+        continue
+    # Guard: do not extract the old flexion-loaded ODB. The .inp was edited after the old
+    # ODB was written, so a genuine re-run has an ODB newer than the .inp.
+    if os.path.getmtime(ODB_PATH) < os.path.getmtime(inp_path):
+        print('SKIPPED - ODB is older than the corrected .inp, so it is still the OLD result '
+              '(re-run the job first): ' + ODB_PATH)
+        SKIPPED.append(ODB_PATH)
+        continue
+    print('=== ' + os.path.basename(ODB_PATH))
+    for script in SCRIPTS:
+        try:
+            print('--- ' + script)
+            execfile(os.path.join(DCM_DIR, script))
+        except Exception as e:
+            print('ERROR in ' + script + ': ' + str(e))
+            ERRORS.append((ODB_PATH, script, str(e)))
+
+print('')
+print('=== Done: {} job(s), {} skipped, {} error(s)'.format(len(JOBS), len(SKIPPED), len(ERRORS)))
+for p in SKIPPED:
+    print('  skipped: ' + p)
+for p, s, m in ERRORS:
+    print('  error:   {} | {} | {}'.format(os.path.basename(p), s, m))
