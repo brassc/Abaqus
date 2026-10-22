@@ -568,7 +568,7 @@ def blob_plot_threshold(ax, threshold_name, arm):
     ax.xaxis.set_minor_formatter(NullFormatter())
     ax.set_title('Threshold = {:g}'.format(BLOB_THRESHOLDS[threshold_name]))
     ax.set_xlabel('MPS concentration effective radius r (mm)')
-    ax.set_ylabel('Cumulative % of total cord volume\nabove MPS threshold')
+    ax.set_ylabel('Cumulative % of cord volume\nabove MPS threshold')
 
 
 blob_patient_handles = [

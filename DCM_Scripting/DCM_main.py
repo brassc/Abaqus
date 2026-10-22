@@ -134,10 +134,6 @@ plt.rcParams.update({
     'mathtext.bf':           'Arial:bold',
 })
 
-# Matplotlib stamps every PDF with a CreationDate, so re-running makes git show
-# all PDFs as modified. A fixed SOURCE_DATE_EPOCH makes the output reproducible.
-os.environ.setdefault('SOURCE_DATE_EPOCH', '0')
-
 BLOB_FACE_SHARING_MIN_NODES = 4   # >=4 shared nodes approximates shared face (all elements are C3D8)
 
 
@@ -740,7 +736,7 @@ def pp_plot_threshold(ax, threshold_name, state_name):
     ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
     ax.set_title('Threshold {} = {:g}'.format(threshold_name.upper(), PPBLOB_THRESHOLDS[threshold_name]))
     ax.set_xlabel('MPS concentration effective radius r (mm)')
-    ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
+    ax.set_ylabel('Cumulative % of cord volume above MPS threshold')
 
 
 pp_patient_handles = [Line2D([0], [0], color=pp_patient_colors[p], linestyle='-',
@@ -2349,7 +2345,7 @@ def s2blob_plot_threshold(ax, threshold_name):
     ax.xaxis.set_minor_formatter(PP_LOG_NULL_FORMATTER)
     ax.set_title('Threshold {} = {:.2f}'.format(threshold_name.upper(), MANUAL_THRESHOLDS[threshold_name]))
     ax.set_xlabel('MPS concentration effective radius r (mm)')
-    ax.set_ylabel('Cumulative % of total cord volume above MPS threshold')
+    ax.set_ylabel('Cumulative % of cord volume above MPS threshold')
 
 
 s2blob_patient_handles = [Line2D([0], [0], color=s2blob_patient_colors[p], linestyle='-',
@@ -2563,7 +2559,24 @@ PRELOAD_COMBINED_THRESHOLD = 't0p10'
 preload_comb_col = 'pct_above_{}'.format(PRELOAD_COMBINED_THRESHOLD)
 preload_comb_color = PRELOAD_PLOT_A_THRESHOLD_COLORS[PRELOAD_COMBINED_THRESHOLD]
 
-preload_comb_fig, (preload_comb_ax_a, preload_comb_ax_b) = plt.subplots(1, 2, figsize=(14, 6))
+# Drawn at the printed width (\linewidth ~ 6.5 in) so font sizes here ARE the sizes on the
+# page; 8 pt is the minimum.
+PRELOAD_COMB_FONT_SIZE = 8         # ticks, legends (minimum)
+PRELOAD_COMB_LABEL_FONT_SIZE = 10   # axis labels
+preload_comb_prev_font_size = plt.rcParams['font.size']
+plt.rcParams.update({'font.size': PRELOAD_COMB_LABEL_FONT_SIZE,
+                     'xtick.labelsize': PRELOAD_COMB_FONT_SIZE, 'ytick.labelsize': PRELOAD_COMB_FONT_SIZE})
+# Plots on the top row, legends in their own axes on the bottom row so they never collide
+# with tick labels / axis labels.
+preload_comb_fig = plt.figure(figsize=(180 / 25.4, 3.9))
+preload_comb_gs = preload_comb_fig.add_gridspec(2, 2, height_ratios=[3.0, 1.2], hspace=0.7, wspace=0.3,
+                                                  left=0.085, right=0.99, top=0.98, bottom=0.02)
+preload_comb_ax_a = preload_comb_fig.add_subplot(preload_comb_gs[0, 0])
+preload_comb_ax_b = preload_comb_fig.add_subplot(preload_comb_gs[0, 1])
+preload_comb_leg_a = preload_comb_fig.add_subplot(preload_comb_gs[1, 0])
+preload_comb_leg_b = preload_comb_fig.add_subplot(preload_comb_gs[1, 1])
+preload_comb_leg_a.axis('off')
+preload_comb_leg_b.axis('off')
 
 for (_, _), preload_grp in preload_summary.groupby(['participant', 'state']):
     if len(preload_grp) == 2:
@@ -2576,16 +2589,17 @@ for (preload_cond, preload_state), preload_grp in preload_summary.groupby(['load
     preload_xs = [preload_x_pos[p] for p in preload_grp['participant']]
     if PRELOAD_STATE_FILLED.get(preload_state, True):
         preload_comb_ax_a.scatter(preload_xs, preload_grp[preload_comb_col], color=preload_comb_color,
-                                   marker=preload_marker, s=55, zorder=3)
+                                   marker=preload_marker, s=30, zorder=3)
     else:
         preload_comb_ax_a.scatter(preload_xs, preload_grp[preload_comb_col], facecolors='none',
-                                   edgecolors=preload_comb_color, marker=preload_marker, s=55,
-                                   linewidths=1.3, zorder=3)
+                                   edgecolors=preload_comb_color, marker=preload_marker, s=30,
+                                   linewidths=1.0, zorder=3)
 
 preload_comb_ax_a.set_xticks(range(len(preload_participants)))
 preload_comb_ax_a.set_xticklabels(
-    ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants])
-preload_comb_ax_a.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+    ['{} ({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants],
+    rotation=90)
+preload_comb_ax_a.set_xlabel('Participant (pre-op mJOA), ascending')
 preload_comb_ax_a.set_ylabel('% cord volume above threshold')
 # One entry per marker actually drawn: condition = marker shape, state = filled/hollow.
 preload_comb_legend_handles = [
@@ -2594,19 +2608,32 @@ preload_comb_legend_handles = [
            label='{}, {}'.format(cond.capitalize(), state_label))
     for state_label, filled in (('PreOp', True), ('PreOp-NoPreload', False))
     for cond, marker in CONDITION_MARKERS.items()]
-preload_comb_ax_a.legend(
-    handles=preload_comb_legend_handles, loc='upper center',
-    bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False, fontsize=10)
 
 s2blob_plot_threshold(preload_comb_ax_b, PRELOAD_COMBINED_THRESHOLD)
 preload_comb_ax_b.set_title('')
+preload_comb_ax_b.set_ylabel('Cumulative % of cord volume\nabove MPS threshold')
 preload_comb_ax_b.set_xlim(
     s2blob_df.loc[s2blob_df['threshold'] == PRELOAD_COMBINED_THRESHOLD, 'r'].min(), 10 ** 1)
-preload_comb_ax_b.legend(
-    handles=s2blob_patient_handles + s2blob_condition_handles, loc='upper center',
-    bbox_to_anchor=(0.5, -0.17), ncol=3, frameon=False, fontsize=10)
+preload_comb_patient_handles = [
+    Line2D([0], [0], color=s2blob_patient_colors[p], linestyle='-',
+           label='{} ({})'.format(p, preop_mjoa_by_participant.get(p, '?')))
+    for p in s2blob_patients_sorted]
 
-preload_comb_fig.tight_layout()
+# Each legend's top edge sits 5 mm below its own plot's x-axis heading, centred under the plot.
+# Nothing on the plots themselves is changed here.
+PRELOAD_COMB_LEGEND_GAP_MM = 5
+preload_comb_fig.canvas.draw()
+for preload_comb_ax, preload_comb_handles, preload_comb_ncol in (
+        (preload_comb_ax_a, preload_comb_legend_handles, 1),
+        (preload_comb_ax_b, preload_comb_patient_handles + s2blob_condition_handles, 3)):
+    preload_comb_xlabel_bottom = preload_comb_ax.xaxis.label.get_window_extent().y0
+    preload_comb_legend_y = (preload_comb_xlabel_bottom
+                             - PRELOAD_COMB_LEGEND_GAP_MM / 25.4 * preload_comb_fig.dpi) / preload_comb_fig.bbox.height
+    preload_comb_ax_pos = preload_comb_ax.get_position()
+    preload_comb_fig.legend(
+        handles=preload_comb_handles, loc='upper center', ncol=preload_comb_ncol, frameon=False,
+        fontsize=PRELOAD_COMB_FONT_SIZE, borderpad=0, borderaxespad=0, bbox_transform=preload_comb_fig.transFigure,
+        bbox_to_anchor=((preload_comb_ax_pos.x0 + preload_comb_ax_pos.x1) / 2, preload_comb_legend_y))
 
 preload_comb_name = 'multipatient_mps_plot_preload_effect_sortedbypreopmJOA_t0pt10.pdf'
 for preload_comb_dir in (STAGE2_RESULTS_DIR, PAPER_FIG_DIR):
@@ -2614,6 +2641,8 @@ for preload_comb_dir in (STAGE2_RESULTS_DIR, PAPER_FIG_DIR):
     preload_comb_fig.savefig(preload_comb_path, bbox_inches='tight')
     print("Plot saved: {}".format(preload_comb_path))
 plt.close(preload_comb_fig)
+plt.rcParams.update({'font.size': preload_comb_prev_font_size,
+                     'xtick.labelsize': 'medium', 'ytick.labelsize': 'medium'})
 
 # ============================================================
 # ============================================================
