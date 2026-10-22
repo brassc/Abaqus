@@ -2597,10 +2597,9 @@ for (preload_cond, preload_state), preload_grp in preload_summary.groupby(['load
 
 preload_comb_ax_a.set_xticks(range(len(preload_participants)))
 preload_comb_ax_a.set_xticklabels(
-    ['{} ({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants],
-    rotation=90)
+    ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants])
 preload_comb_ax_a.set_xlabel('Participant (pre-op mJOA), ascending')
-preload_comb_ax_a.set_ylabel('% cord volume above threshold')
+preload_comb_ax_a.set_ylabel('% cord volume above\nMPS threshold (0.10)')
 # One entry per marker actually drawn: condition = marker shape, state = filled/hollow.
 preload_comb_legend_handles = [
     Line2D([0], [0], marker=marker, linestyle='', color=preload_comb_color,
@@ -2611,7 +2610,7 @@ preload_comb_legend_handles = [
 
 s2blob_plot_threshold(preload_comb_ax_b, PRELOAD_COMBINED_THRESHOLD)
 preload_comb_ax_b.set_title('')
-preload_comb_ax_b.set_ylabel('Cumulative % of cord volume\nabove MPS threshold')
+preload_comb_ax_b.set_ylabel('Cumulative % cord volume\nabove MPS threshold (0.10)')
 preload_comb_ax_b.set_xlim(
     s2blob_df.loc[s2blob_df['threshold'] == PRELOAD_COMBINED_THRESHOLD, 'r'].min(), 10 ** 1)
 preload_comb_patient_handles = [
