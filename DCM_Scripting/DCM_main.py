@@ -124,6 +124,10 @@ DELTA_FUSION_PARTICIPANTS = {'P1', 'P5', 'P7', 'P8'}
 
 plt.rcParams.update(PLOT_STYLE)
 
+# Matplotlib stamps every PDF with a CreationDate, so re-running makes git show
+# all PDFs as modified. A fixed SOURCE_DATE_EPOCH makes the output reproducible.
+os.environ.setdefault('SOURCE_DATE_EPOCH', '0')
+
 BLOB_FACE_SHARING_MIN_NODES = 4   # >=4 shared nodes approximates shared face (all elements are C3D8)
 
 
@@ -2537,6 +2541,61 @@ plt.close(preload_fig)
 
 print("Summary saved: {}".format(preload_summary_path))
 print("Plot saved: {}".format(preload_plot_path))
+
+# ============================================================
+# Combined 1x2 for the paper: (a) preload-effect plot at threshold 0.10 only,
+# (b) cumulative blob-size distribution at the same threshold (Part G).
+# Saved to the results dir and to the paper's figures folder.
+# ============================================================
+PAPER_FIG_DIR = r'C:\Users\cmb247\repos\Paper-DCMv2\figures'
+os.makedirs(PAPER_FIG_DIR, exist_ok=True)
+PRELOAD_COMBINED_THRESHOLD = 't0p10'
+preload_comb_col = 'pct_above_{}'.format(PRELOAD_COMBINED_THRESHOLD)
+preload_comb_color = PRELOAD_PLOT_A_THRESHOLD_COLORS[PRELOAD_COMBINED_THRESHOLD]
+
+preload_comb_fig, (preload_comb_ax_a, preload_comb_ax_b) = plt.subplots(1, 2, figsize=(14, 6))
+
+for (_, _), preload_grp in preload_summary.groupby(['participant', 'state']):
+    if len(preload_grp) == 2:
+        preload_xp = preload_x_pos[preload_grp['participant'].iloc[0]]
+        preload_comb_ax_a.vlines(preload_xp, preload_grp[preload_comb_col].min(),
+                                  preload_grp[preload_comb_col].max(),
+                                  color=preload_comb_color, linewidth=1.0, alpha=0.5, zorder=2)
+for (preload_cond, preload_state), preload_grp in preload_summary.groupby(['loading_condition', 'state']):
+    preload_marker = CONDITION_MARKERS.get(preload_cond.strip().lower(), 'o')
+    preload_xs = [preload_x_pos[p] for p in preload_grp['participant']]
+    if PRELOAD_STATE_FILLED.get(preload_state, True):
+        preload_comb_ax_a.scatter(preload_xs, preload_grp[preload_comb_col], color=preload_comb_color,
+                                   marker=preload_marker, s=55, zorder=3)
+    else:
+        preload_comb_ax_a.scatter(preload_xs, preload_grp[preload_comb_col], facecolors='none',
+                                   edgecolors=preload_comb_color, marker=preload_marker, s=55,
+                                   linewidths=1.3, zorder=3)
+
+preload_comb_ax_a.set_xticks(range(len(preload_participants)))
+preload_comb_ax_a.set_xticklabels(
+    ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants])
+preload_comb_ax_a.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
+preload_comb_ax_a.set_ylabel('% cord volume above threshold')
+preload_comb_ax_a.set_title('Effect of simulated compression-site preload\n(threshold {:.2f})'.format(
+    PRELOAD_PLOT_A_THRESHOLDS[PRELOAD_COMBINED_THRESHOLD]))
+preload_comb_ax_a.legend(
+    handles=preload_condition_handles + preload_state_handles, loc='upper center',
+    bbox_to_anchor=(0.5, -0.22), ncol=4, frameon=False, fontsize=8)
+
+s2blob_plot_threshold(preload_comb_ax_b, PRELOAD_COMBINED_THRESHOLD)
+preload_comb_ax_b.legend(
+    handles=s2blob_patient_handles + s2blob_condition_handles, loc='upper center',
+    bbox_to_anchor=(0.5, -0.22), ncol=4, frameon=False, fontsize=8)
+
+preload_comb_fig.tight_layout()
+
+preload_comb_name = 'multipatient_mps_plot_preload_effect_sortedbypreopmJOA_t0pt10.pdf'
+for preload_comb_dir in (STAGE2_RESULTS_DIR, PAPER_FIG_DIR):
+    preload_comb_path = os.path.join(preload_comb_dir, preload_comb_name)
+    preload_comb_fig.savefig(preload_comb_path, bbox_inches='tight')
+    print("Plot saved: {}".format(preload_comb_path))
+plt.close(preload_comb_fig)
 
 # ============================================================
 # ============================================================
