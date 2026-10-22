@@ -123,6 +123,16 @@ DELTA_FUSION_PARTICIPANTS = {'P1', 'P5', 'P7', 'P8'}
 # ============================================================
 
 plt.rcParams.update(PLOT_STYLE)
+# Embed Arial as TrueType (not Type 3) so it stays Arial in Illustrator/journal
+# pipelines, and make mathtext (e.g. log-axis exponents) use Arial too.
+plt.rcParams.update({
+    'pdf.fonttype':          42,
+    'ps.fonttype':           42,
+    'mathtext.fontset':      'custom',
+    'mathtext.rm':           'Arial',
+    'mathtext.it':           'Arial:italic',
+    'mathtext.bf':           'Arial:bold',
+})
 
 # Matplotlib stamps every PDF with a CreationDate, so re-running makes git show
 # all PDFs as modified. A fixed SOURCE_DATE_EPOCH makes the output reproducible.
@@ -2577,16 +2587,24 @@ preload_comb_ax_a.set_xticklabels(
     ['{}\n({})'.format(p, preop_mjoa_by_participant.get(p, '?')) for p in preload_participants])
 preload_comb_ax_a.set_xlabel('Participant (ordered by pre-op mJOA, ascending)')
 preload_comb_ax_a.set_ylabel('% cord volume above threshold')
-preload_comb_ax_a.set_title('Effect of simulated compression-site preload\n(threshold {:.2f})'.format(
-    PRELOAD_PLOT_A_THRESHOLDS[PRELOAD_COMBINED_THRESHOLD]))
+# One entry per marker actually drawn: condition = marker shape, state = filled/hollow.
+preload_comb_legend_handles = [
+    Line2D([0], [0], marker=marker, linestyle='', color=preload_comb_color,
+           markerfacecolor=preload_comb_color if filled else 'none',
+           label='{}, {}'.format(cond.capitalize(), state_label))
+    for state_label, filled in (('PreOp', True), ('PreOp-NoPreload', False))
+    for cond, marker in CONDITION_MARKERS.items()]
 preload_comb_ax_a.legend(
-    handles=preload_condition_handles + preload_state_handles, loc='upper center',
-    bbox_to_anchor=(0.5, -0.22), ncol=4, frameon=False, fontsize=8)
+    handles=preload_comb_legend_handles, loc='upper center',
+    bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False, fontsize=10)
 
 s2blob_plot_threshold(preload_comb_ax_b, PRELOAD_COMBINED_THRESHOLD)
+preload_comb_ax_b.set_title('')
+preload_comb_ax_b.set_xlim(
+    s2blob_df.loc[s2blob_df['threshold'] == PRELOAD_COMBINED_THRESHOLD, 'r'].min(), 10 ** 1)
 preload_comb_ax_b.legend(
     handles=s2blob_patient_handles + s2blob_condition_handles, loc='upper center',
-    bbox_to_anchor=(0.5, -0.22), ncol=4, frameon=False, fontsize=8)
+    bbox_to_anchor=(0.5, -0.17), ncol=3, frameon=False, fontsize=10)
 
 preload_comb_fig.tight_layout()
 
